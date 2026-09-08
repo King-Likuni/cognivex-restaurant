@@ -17,23 +17,23 @@ services:
         value: production
       - key: VERSION
         value: 0.1.0
-      - key: DATABASE_URL
+      - key: postgresql://neondb_owner:npg_MbeL53XkIsTm@ep-curly-moon-ayniw57h-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
         sync: false
       - key: REDIS_URL
         value: ""
-      - key: SECRET_KEY
+      - key: UMJ-qN_qWMqGJPfEDVyKscr3pyxiO_HRShrU1EJaQycRIHTvbiWAhCaTP_6Xaz1x
         generateValue: true
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "10080"
-      - key: PAYMENT_WEBHOOK_SECRET
+      - key: 5RARlYyX7uHOuydmJIby532SPCv_ALG6PvC5KVGcggiTLqbUmMZT1MkxTfXfMLOa
         sync: false
-      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+      - key: gw73FeS7E5sgdqIsCiH0VSk3Jv4BpPdr
         sync: false
-      - key: WHATSAPP_WEBHOOK_APP_SECRET
+      - key: x-PxevcOGhbAQ4xh7nDXVdYtkFrVK67U1cWzsMF57ojQpkly_XEcfUgwow_BvDxt
         sync: false
       - key: INITIAL_ADMIN_EMAIL
         value: admin@cognivex.com
-      - key: INITIAL_ADMIN_PASSWORD
+      - key: RhHWXjZtkJfFZG7kOfzfiGgmdYqAtkt-
         sync: false
       - key: ENABLE_SAMPLE_DATA
         value: "false"
@@ -43,5 +43,5 @@ services:
         value: "1"
       - key: WEB_CONCURRENCY
         value: "1"
-      - key: BACKEND_CORS_ORIGINS
+      - key: ["https://temporary.vercel.app"]
         sync: false
