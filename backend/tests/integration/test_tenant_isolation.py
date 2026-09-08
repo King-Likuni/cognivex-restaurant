@@ -283,3 +283,56 @@ def test_admin_can_cross_restaurant_boundary_for_platform_operations(
     )
     assert get_response.status_code == 200
     assert get_response.json()["name"] == "Burger Barn Test"
+
+
+def test_admin_can_create_first_restaurant_owner(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+
+    response = api_client.post(
+        "/api/v1/auth/users",
+        headers=admin_headers,
+        json={
+            "email": "new-owner@example.com",
+            "password": "new-owner-password",
+            "first_name": "New",
+            "last_name": "Owner",
+            "role_name": "OWNER",
+            "restaurant_id": restaurant_id,
+            "branch_ids": [],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["role_name"] == "OWNER"
+    assert payload["restaurant_id"] == restaurant_id
+
+
+def test_owner_cannot_create_user_for_another_restaurant(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    other = create_second_restaurant(db_session)
+    first_owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    response = api_client.post(
+        "/api/v1/auth/users",
+        headers=first_owner_headers,
+        json={
+            "email": "cross-tenant-manager@example.com",
+            "password": "manager-password",
+            "first_name": "Cross",
+            "last_name": "Tenant",
+            "role_name": "MANAGER",
+            "restaurant_id": str(other["restaurant"].id),
+            "branch_ids": [],
+        },
+    )
+
+    assert response.status_code == 403

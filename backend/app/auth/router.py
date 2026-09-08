@@ -12,10 +12,15 @@ from app.auth.schemas import (
     UserResponse,
 )
 from app.core.database import get_db
-from app.core.dependencies import get_current_active_user, require_manager
+from app.core.dependencies import (
+    RoleChecker,
+    ensure_restaurant_access,
+    get_current_active_user,
+)
 from app.core.security import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+require_user_creator = RoleChecker(["ADMIN", "OWNER", "MANAGER"])
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -72,13 +77,33 @@ def read_current_user(current_user: User = Depends(get_current_active_user)):
     "/users",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_manager)],
 )
 def create_user(
     user_in: UserCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_creator),
 ):
-    """Create a new user. Only Owners and Managers can create users."""
+    """Create a new user.
+
+    Platform admins can provision tenant owners. Restaurant owners and managers
+    can create staff only within their own restaurant.
+    """
+    current_role = current_user.role.name if current_user.role else None
+    requested_role = user_in.role_name.upper()
+    if current_role != "ADMIN":
+        if requested_role == "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Restaurant users cannot create platform admins",
+            )
+        if user_in.restaurant_id is not None:
+            ensure_restaurant_access(current_user, user_in.restaurant_id)
+    if current_role == "MANAGER" and requested_role == "OWNER":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Managers cannot create restaurant owners",
+        )
+
     try:
         user = service.create_user(db, user_in)
     except ValueError as e:
