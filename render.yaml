@@ -17,23 +17,23 @@ services:
         value: production
       - key: VERSION
         value: 0.1.0
-      - key: postgresql://neondb_owner:npg_MbeL53XkIsTm@ep-curly-moon-ayniw57h-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
         value: ""
-      - key: UMJ-qN_qWMqGJPfEDVyKscr3pyxiO_HRShrU1EJaQycRIHTvbiWAhCaTP_6Xaz1x
+      - key: SECRET_KEY
         generateValue: true
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "10080"
-      - key: 5RARlYyX7uHOuydmJIby532SPCv_ALG6PvC5KVGcggiTLqbUmMZT1MkxTfXfMLOa
+      - key: PAYMENT_WEBHOOK_SECRET
         sync: false
-      - key: gw73FeS7E5sgdqIsCiH0VSk3Jv4BpPdr
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
         sync: false
-      - key: x-PxevcOGhbAQ4xh7nDXVdYtkFrVK67U1cWzsMF57ojQpkly_XEcfUgwow_BvDxt
+      - key: WHATSAPP_WEBHOOK_APP_SECRET
         sync: false
       - key: INITIAL_ADMIN_EMAIL
         value: admin@cognivex.com
-      - key: RhHWXjZtkJfFZG7kOfzfiGgmdYqAtkt-
+      - key: INITIAL_ADMIN_PASSWORD
         sync: false
       - key: ENABLE_SAMPLE_DATA
         value: "false"
