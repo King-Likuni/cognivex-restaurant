@@ -2,6 +2,7 @@
 #
 # Use this for the API only. Keep PostgreSQL on Neon for the zero-budget path,
 # then paste the Neon pooled connection string into DATABASE_URL in Render.
+
 services:
   - type: web
     name: cognivex-restaurant-api
@@ -16,31 +17,31 @@ services:
         value: production
       - key: VERSION
         value: 0.1.0
-      - key: DATABASE_URL
+      - key: postgresql://neondb_owner:npg_QSWaDT7OKG3d@ep-curly-moon-ayniw57h-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
         sync: false
       - key: REDIS_URL
         value: ""
-      - key: SECRET_KEY
+      - key: I3aDx9CB3R0TI6iN4EJoyoC_WkjV2IVbPbhRXxYY0CkGxLtL-ivyN94IuyC9b-3d
         generateValue: true
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "10080"
-      - key: PAYMENT_WEBHOOK_SECRET
+      - key: goynfl46OzWWUpEqClhrKgzTwOMnHnZQbIzw6pzvUcCfkVCww7qwTrZVMN-YI5U0
         sync: false
-      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+      - key: gw73FeS7E5sgdqIsCiH0VSk3Jv4BpPdr
         sync: false
-      - key: WHATSAPP_WEBHOOK_APP_SECRET
+      - key: BV9LCuYJLNCdskL-zxijt-8yYt85L7g3idoUn7ik9SLmQsjga2eW3a1jp550hNiA
         sync: false
       - key: INITIAL_ADMIN_EMAIL
         value: admin@cognivex.com
-      - key: INITIAL_ADMIN_PASSWORD
+      - key: 6JCI9SwPyY1yS_VbjhnGqjv2wcBXGS1B
         sync: false
       - key: ENABLE_SAMPLE_DATA
         value: "false"
       - key: RUN_MIGRATIONS
         value: "1"
       - key: RUN_INITIAL_DATA
-        value: "0"
+        value: "1"
       - key: WEB_CONCURRENCY
         value: "1"
-      - key: BACKEND_CORS_ORIGINS
+      - key: ["https://temporary.vercel.app"]
         sync: false
