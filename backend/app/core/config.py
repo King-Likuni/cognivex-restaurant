@@ -104,7 +104,7 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "WHATSAPP_WEBHOOK_VERIFY_TOKEN must be changed in staging/production"
                 )
-            if self.POSTGRES_PASSWORD in {"change-me", "password123"}:
+            if not self.DATABASE_URL and self.POSTGRES_PASSWORD in {"change-me", "password123"}:
                 raise ValueError("POSTGRES_PASSWORD must be changed in staging/production")
             if "*" in self.BACKEND_CORS_ORIGINS:
                 raise ValueError("Wildcard CORS origins are not allowed in staging/production")

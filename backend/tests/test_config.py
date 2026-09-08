@@ -41,6 +41,22 @@ def test_database_url_takes_precedence_over_component_settings():
     assert settings.SQLALCHEMY_DATABASE_URI == "postgresql://example:secret@db:5432/example"
 
 
+def test_production_allows_database_url_without_component_password():
+    settings = Settings(
+        ENVIRONMENT="production",
+        DATABASE_URL="postgresql://example:secret@db:5432/example?sslmode=require",
+        SECRET_KEY="strong-secret-value-for-production-123456",
+        PAYMENT_WEBHOOK_SECRET="strong-payment-webhook-secret-123456",
+        WHATSAPP_WEBHOOK_VERIFY_TOKEN="strong-verify-token",
+        WHATSAPP_WEBHOOK_APP_SECRET="strong-whatsapp-app-secret-123456",
+        BACKEND_CORS_ORIGINS=["https://app.example.com"],
+        INITIAL_ADMIN_PASSWORD="strong-admin-password",
+        ENABLE_SAMPLE_DATA=False,
+    )
+
+    assert settings.SQLALCHEMY_DATABASE_URI.endswith("?sslmode=require")
+
+
 def test_cors_origins_accept_comma_separated_values():
     settings = Settings(BACKEND_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3010")
 
