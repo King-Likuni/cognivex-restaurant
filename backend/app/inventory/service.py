@@ -1,0 +1,494 @@
+"""Inventory service layer."""
+
+from collections import defaultdict
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.audit.models import AuditLog
+from app.auth.models import User
+from app.inventory.enums import StockMovementType
+from app.inventory.models import Ingredient, MenuItemRecipeItem, StockLocation, StockMovement
+from app.inventory.schemas import (
+    IngredientCreate,
+    IngredientUpdate,
+    RecipeItemCreate,
+    RecipeItemUpdate,
+    StockLocationCreate,
+    StockMovementCreate,
+)
+from app.menu.models import MenuItem
+from app.orders.models import Order
+from app.tenants.models import Branch
+
+
+def get_branch(db: Session, restaurant_id: UUID, branch_id: UUID) -> Branch | None:
+    return (
+        db.query(Branch)
+        .filter(
+            Branch.id == branch_id,
+            Branch.restaurant_id == restaurant_id,
+            Branch.is_active.is_(True),
+        )
+        .first()
+    )
+
+
+def create_ingredient(db: Session, restaurant_id: UUID, data: IngredientCreate) -> Ingredient:
+    existing = (
+        db.query(Ingredient)
+        .filter(
+            Ingredient.restaurant_id == restaurant_id,
+            func.lower(Ingredient.name) == data.name.strip().lower(),
+        )
+        .first()
+    )
+    if existing is not None:
+        raise ValueError("Ingredient already exists")
+
+    ingredient = Ingredient(
+        restaurant_id=restaurant_id,
+        name=data.name.strip(),
+        unit=data.unit.strip(),
+    )
+    db.add(ingredient)
+    db.commit()
+    db.refresh(ingredient)
+    return ingredient
+
+
+def list_ingredients(db: Session, restaurant_id: UUID) -> list[Ingredient]:
+    return (
+        db.query(Ingredient)
+        .filter(Ingredient.restaurant_id == restaurant_id)
+        .order_by(Ingredient.name)
+        .all()
+    )
+
+
+def get_ingredient(db: Session, restaurant_id: UUID, ingredient_id: UUID) -> Ingredient | None:
+    return (
+        db.query(Ingredient)
+        .filter(Ingredient.restaurant_id == restaurant_id, Ingredient.id == ingredient_id)
+        .first()
+    )
+
+
+def update_ingredient(
+    db: Session,
+    restaurant_id: UUID,
+    ingredient_id: UUID,
+    data: IngredientUpdate,
+) -> Ingredient | None:
+    ingredient = get_ingredient(db, restaurant_id, ingredient_id)
+    if ingredient is None:
+        return None
+
+    updates = data.model_dump(exclude_unset=True)
+    if "name" in updates:
+        name = updates["name"].strip()
+        duplicate = (
+            db.query(Ingredient)
+            .filter(
+                Ingredient.restaurant_id == restaurant_id,
+                Ingredient.id != ingredient_id,
+                func.lower(Ingredient.name) == name.lower(),
+            )
+            .first()
+        )
+        if duplicate is not None:
+            raise ValueError("Ingredient already exists")
+        ingredient.name = name
+    if "unit" in updates:
+        ingredient.unit = updates["unit"].strip()
+
+    db.commit()
+    db.refresh(ingredient)
+    return ingredient
+
+
+def create_stock_location(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    data: StockLocationCreate,
+) -> StockLocation:
+    branch = get_branch(db, restaurant_id, branch_id)
+    if branch is None:
+        raise ValueError("Branch not found")
+
+    existing = (
+        db.query(StockLocation)
+        .filter(
+            StockLocation.branch_id == branch_id,
+            func.lower(StockLocation.name) == data.name.strip().lower(),
+        )
+        .first()
+    )
+    if existing is not None:
+        raise ValueError("Stock location already exists for this branch")
+
+    location = StockLocation(
+        restaurant_id=restaurant_id,
+        branch_id=branch_id,
+        name=data.name.strip(),
+    )
+    db.add(location)
+    db.commit()
+    db.refresh(location)
+    return location
+
+
+def list_stock_locations(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+) -> list[StockLocation]:
+    return (
+        db.query(StockLocation)
+        .filter(StockLocation.restaurant_id == restaurant_id, StockLocation.branch_id == branch_id)
+        .order_by(StockLocation.name)
+        .all()
+    )
+
+
+def get_stock_location(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    stock_location_id: UUID,
+) -> StockLocation | None:
+    return (
+        db.query(StockLocation)
+        .filter(
+            StockLocation.id == stock_location_id,
+            StockLocation.restaurant_id == restaurant_id,
+            StockLocation.branch_id == branch_id,
+        )
+        .first()
+    )
+
+
+def get_menu_item(db: Session, restaurant_id: UUID, menu_item_id: UUID) -> MenuItem | None:
+    return (
+        db.query(MenuItem)
+        .filter(MenuItem.id == menu_item_id, MenuItem.restaurant_id == restaurant_id)
+        .first()
+    )
+
+
+def upsert_recipe_item(
+    db: Session,
+    restaurant_id: UUID,
+    menu_item_id: UUID,
+    data: RecipeItemCreate,
+) -> MenuItemRecipeItem:
+    menu_item = get_menu_item(db, restaurant_id, menu_item_id)
+    if menu_item is None:
+        raise ValueError("Menu item not found")
+    ingredient = get_ingredient(db, restaurant_id, data.ingredient_id)
+    if ingredient is None:
+        raise ValueError("Ingredient not found")
+
+    recipe_item = (
+        db.query(MenuItemRecipeItem)
+        .filter(
+            MenuItemRecipeItem.menu_item_id == menu_item_id,
+            MenuItemRecipeItem.ingredient_id == data.ingredient_id,
+        )
+        .first()
+    )
+    if recipe_item is None:
+        recipe_item = MenuItemRecipeItem(
+            menu_item_id=menu_item_id,
+            ingredient_id=data.ingredient_id,
+            quantity=data.quantity,
+        )
+        db.add(recipe_item)
+    else:
+        recipe_item.quantity = data.quantity
+
+    db.commit()
+    db.refresh(recipe_item)
+    return recipe_item
+
+
+def list_recipe_items(
+    db: Session,
+    restaurant_id: UUID,
+    menu_item_id: UUID,
+) -> list[MenuItemRecipeItem]:
+    menu_item = get_menu_item(db, restaurant_id, menu_item_id)
+    if menu_item is None:
+        raise ValueError("Menu item not found")
+    return (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(
+            MenuItemRecipeItem.menu_item_id == menu_item_id,
+            Ingredient.restaurant_id == restaurant_id,
+        )
+        .order_by(Ingredient.name)
+        .all()
+    )
+
+
+def update_recipe_item(
+    db: Session,
+    restaurant_id: UUID,
+    menu_item_id: UUID,
+    recipe_item_id: UUID,
+    data: RecipeItemUpdate,
+) -> MenuItemRecipeItem | None:
+    menu_item = get_menu_item(db, restaurant_id, menu_item_id)
+    if menu_item is None:
+        raise ValueError("Menu item not found")
+    recipe_item = (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(
+            MenuItemRecipeItem.id == recipe_item_id,
+            MenuItemRecipeItem.menu_item_id == menu_item_id,
+            Ingredient.restaurant_id == restaurant_id,
+        )
+        .first()
+    )
+    if recipe_item is None:
+        return None
+    recipe_item.quantity = data.quantity
+    db.commit()
+    db.refresh(recipe_item)
+    return recipe_item
+
+
+def delete_recipe_item(
+    db: Session,
+    restaurant_id: UUID,
+    menu_item_id: UUID,
+    recipe_item_id: UUID,
+) -> bool:
+    menu_item = get_menu_item(db, restaurant_id, menu_item_id)
+    if menu_item is None:
+        raise ValueError("Menu item not found")
+    recipe_item = (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(
+            MenuItemRecipeItem.id == recipe_item_id,
+            MenuItemRecipeItem.menu_item_id == menu_item_id,
+            Ingredient.restaurant_id == restaurant_id,
+        )
+        .first()
+    )
+    if recipe_item is None:
+        return False
+    db.delete(recipe_item)
+    db.commit()
+    return True
+
+
+def get_stock_balance(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    ingredient_id: UUID,
+    *,
+    stock_location_id: UUID | None = None,
+) -> Decimal:
+    query = db.query(func.coalesce(func.sum(StockMovement.quantity), 0)).filter(
+        StockMovement.restaurant_id == restaurant_id,
+        StockMovement.branch_id == branch_id,
+        StockMovement.ingredient_id == ingredient_id,
+    )
+    if stock_location_id is not None:
+        query = query.filter(StockMovement.stock_location_id == stock_location_id)
+    return Decimal(query.scalar() or 0)
+
+
+def list_stock_balances(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    *,
+    stock_location_id: UUID | None = None,
+) -> list[tuple[Ingredient, Decimal]]:
+    grouped = (
+        db.query(StockMovement.ingredient_id, func.coalesce(func.sum(StockMovement.quantity), 0))
+        .filter(
+            StockMovement.restaurant_id == restaurant_id,
+            StockMovement.branch_id == branch_id,
+        )
+        .group_by(StockMovement.ingredient_id)
+    )
+    if stock_location_id is not None:
+        grouped = grouped.filter(StockMovement.stock_location_id == stock_location_id)
+    balances_by_ingredient = {
+        ingredient_id: Decimal(quantity or 0) for ingredient_id, quantity in grouped.all()
+    }
+    ingredients = list_ingredients(db, restaurant_id)
+    return [
+        (ingredient, balances_by_ingredient.get(ingredient.id, Decimal("0.000")))
+        for ingredient in ingredients
+    ]
+
+
+def create_stock_movement(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    data: StockMovementCreate,
+    created_by: User,
+) -> StockMovement:
+    location = get_stock_location(db, restaurant_id, branch_id, data.stock_location_id)
+    if location is None:
+        raise ValueError("Stock location not found")
+    ingredient = get_ingredient(db, restaurant_id, data.ingredient_id)
+    if ingredient is None:
+        raise ValueError("Ingredient not found")
+
+    movement = StockMovement(
+        restaurant_id=restaurant_id,
+        branch_id=branch_id,
+        stock_location_id=data.stock_location_id,
+        ingredient_id=data.ingredient_id,
+        movement_type=data.movement_type.value,
+        quantity=data.quantity,
+        created_by=created_by.id,
+    )
+    db.add(movement)
+    db.flush()
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant_id,
+            user_id=created_by.id,
+            action="STOCK_MOVEMENT_CREATED",
+            entity_type="stock_movement",
+            entity_id=movement.id,
+            old_values=None,
+            new_values={
+                "branch_id": str(branch_id),
+                "stock_location_id": str(data.stock_location_id),
+                "ingredient_id": str(data.ingredient_id),
+                "movement_type": data.movement_type.value,
+                "quantity": str(data.quantity),
+            },
+        )
+    )
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+def list_stock_movements(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    *,
+    ingredient_id: UUID | None = None,
+    stock_location_id: UUID | None = None,
+) -> list[StockMovement]:
+    query = db.query(StockMovement).filter(
+        StockMovement.restaurant_id == restaurant_id,
+        StockMovement.branch_id == branch_id,
+    )
+    if ingredient_id is not None:
+        query = query.filter(StockMovement.ingredient_id == ingredient_id)
+    if stock_location_id is not None:
+        query = query.filter(StockMovement.stock_location_id == stock_location_id)
+    return query.order_by(StockMovement.created_at, StockMovement.id).all()
+
+
+def get_default_consumption_location(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+) -> StockLocation | None:
+    locations = list_stock_locations(db, restaurant_id, branch_id)
+    for location in locations:
+        if location.name.strip().lower() == "kitchen":
+            return location
+    return locations[0] if locations else None
+
+
+def consume_order_stock(db: Session, order: Order, changed_by: User) -> list[StockMovement]:
+    menu_item_ids = [line.menu_item_id for line in order.items]
+    recipe_items = (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(
+            MenuItemRecipeItem.menu_item_id.in_(menu_item_ids),
+            Ingredient.restaurant_id == order.restaurant_id,
+        )
+        .all()
+    )
+    if not recipe_items:
+        return []
+
+    ordered_quantities: dict[UUID, int] = defaultdict(int)
+    for line in order.items:
+        ordered_quantities[line.menu_item_id] += line.quantity
+    required_by_ingredient: dict[UUID, Decimal] = defaultdict(lambda: Decimal("0.000"))
+    ingredients_by_id: dict[UUID, Ingredient] = {}
+    for recipe_item in recipe_items:
+        required_by_ingredient[recipe_item.ingredient_id] += (
+            Decimal(recipe_item.quantity) * ordered_quantities[recipe_item.menu_item_id]
+        )
+        ingredients_by_id[recipe_item.ingredient_id] = recipe_item.ingredient
+
+    location = get_default_consumption_location(db, order.restaurant_id, order.branch_id)
+    if location is None:
+        raise ValueError("Stock location is required before recipe-based consumption")
+
+    for ingredient_id, required_quantity in required_by_ingredient.items():
+        available_quantity = get_stock_balance(
+            db,
+            order.restaurant_id,
+            order.branch_id,
+            ingredient_id,
+            stock_location_id=location.id,
+        )
+        if available_quantity < required_quantity:
+            ingredient = ingredients_by_id[ingredient_id]
+            raise ValueError(f"Insufficient stock for ingredient '{ingredient.name}'")
+
+    movements: list[StockMovement] = []
+    for ingredient_id, required_quantity in required_by_ingredient.items():
+        movement = StockMovement(
+            restaurant_id=order.restaurant_id,
+            branch_id=order.branch_id,
+            stock_location_id=location.id,
+            ingredient_id=ingredient_id,
+            movement_type=StockMovementType.ORDER_CONSUMPTION.value,
+            quantity=-required_quantity,
+            reference_type="order",
+            reference_id=order.id,
+            created_by=changed_by.id,
+        )
+        db.add(movement)
+        movements.append(movement)
+
+    db.flush()
+    db.add(
+        AuditLog(
+            restaurant_id=order.restaurant_id,
+            user_id=changed_by.id,
+            action="ORDER_STOCK_CONSUMED",
+            entity_type="order",
+            entity_id=order.id,
+            old_values=None,
+            new_values={
+                "stock_location_id": str(location.id),
+                "movements": [
+                    {
+                        "ingredient_id": str(movement.ingredient_id),
+                        "movement_id": str(movement.id),
+                        "quantity": str(movement.quantity),
+                    }
+                    for movement in movements
+                ],
+            },
+        )
+    )
+    return movements

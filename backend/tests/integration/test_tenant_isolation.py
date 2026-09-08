@@ -1,0 +1,285 @@
+from datetime import date
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.auth.schemas import UserCreate
+from app.auth.service import create_user
+from app.tenants.schemas import BranchCreate, RestaurantCreate
+from app.tenants.service import create_branch, create_restaurant
+
+pytestmark = pytest.mark.integration
+
+
+def login(client: TestClient, email: str, password: str) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def create_second_restaurant(db_session: Session) -> dict[str, object]:
+    restaurant = create_restaurant(
+        db_session,
+        RestaurantCreate(name="Burger Barn Test", code="BBT"),
+    )
+    branch = create_branch(
+        db_session,
+        restaurant.id,
+        BranchCreate(name="Station Test", code="STN", location="Gaborone"),
+    )
+    owner = create_user(
+        db_session,
+        UserCreate(
+            email="owner2@example.com",
+            password="ownerpassword",
+            first_name="Second",
+            last_name="Owner",
+            role_name="OWNER",
+            restaurant_id=restaurant.id,
+        ),
+    )
+    cashier = create_user(
+        db_session,
+        UserCreate(
+            email="cashier2@example.com",
+            password="cashierpassword",
+            first_name="Second",
+            last_name="Cashier",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    return {"restaurant": restaurant, "branch": branch, "owner": owner, "cashier": cashier}
+
+
+def create_menu_item(
+    client: TestClient,
+    restaurant_id: str,
+    headers: dict[str, str],
+    *,
+    item_name: str = "Isolation Meal",
+) -> dict[str, str]:
+    category_response = client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/categories",
+        headers=headers,
+        json={"name": "Isolation Category", "display_order": 1},
+    )
+    assert category_response.status_code == 201, category_response.text
+    category = category_response.json()
+    item_response = client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/items",
+        headers=headers,
+        json={
+            "category_id": category["id"],
+            "name": item_name,
+            "description": None,
+            "price": "50.00",
+            "image_url": None,
+            "is_available": True,
+        },
+    )
+    assert item_response.status_code == 201, item_response.text
+    return item_response.json()
+
+
+def create_ready_order(
+    client: TestClient,
+    restaurant_id: str,
+    branch_id: str,
+    headers: dict[str, str],
+) -> dict[str, str]:
+    item = create_menu_item(client, restaurant_id, headers)
+    order_response = client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert order_response.status_code == 201, order_response.text
+    order = order_response.json()
+    payment_response = client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/cash/confirm",
+        headers=headers,
+        json={"amount_received": "50.00"},
+    )
+    assert payment_response.status_code == 201, payment_response.text
+    start_response = client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=headers,
+    )
+    assert start_response.status_code == 200, start_response.text
+    ready_response = client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/ready",
+        headers=headers,
+    )
+    assert ready_response.status_code == 200, ready_response.text
+    return ready_response.json()
+
+
+def test_owner_cannot_read_or_write_another_restaurant(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    other = create_second_restaurant(db_session)
+    first_restaurant_id = str(seeded_restaurant["restaurant"].id)
+    other_restaurant_id = str(other["restaurant"].id)
+    first_owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    get_response = api_client.get(
+        f"/api/v1/restaurants/{other_restaurant_id}",
+        headers=first_owner_headers,
+    )
+    assert get_response.status_code == 403
+
+    branches_response = api_client.get(
+        f"/api/v1/restaurants/{other_restaurant_id}/branches",
+        headers=first_owner_headers,
+    )
+    assert branches_response.status_code == 403
+
+    category_response = api_client.post(
+        f"/api/v1/restaurants/{other_restaurant_id}/menu/categories",
+        headers=first_owner_headers,
+        json={"name": "Should Fail", "display_order": 1},
+    )
+    assert category_response.status_code == 403
+
+    own_restaurant_response = api_client.get(
+        f"/api/v1/restaurants/{first_restaurant_id}",
+        headers=first_owner_headers,
+    )
+    assert own_restaurant_response.status_code == 200
+
+
+def test_cross_tenant_branch_and_order_operations_are_blocked(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    other = create_second_restaurant(db_session)
+    first_restaurant_id = str(seeded_restaurant["restaurant"].id)
+    first_branch_id = str(seeded_restaurant["branch"].id)
+    other_restaurant_id = str(other["restaurant"].id)
+    other_branch_id = str(other["branch"].id)
+    first_owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    other_owner_headers = login(api_client, "owner2@example.com", "ownerpassword")
+
+    item = create_menu_item(api_client, first_restaurant_id, first_owner_headers)
+
+    create_cross_order_response = api_client.post(
+        f"/api/v1/restaurants/{first_restaurant_id}/branches/{first_branch_id}/orders/cashier",
+        headers=other_owner_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert create_cross_order_response.status_code == 403
+
+    mismatched_branch_response = api_client.post(
+        f"/api/v1/restaurants/{first_restaurant_id}/branches/{other_branch_id}/orders/cashier",
+        headers=first_owner_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert mismatched_branch_response.status_code == 403
+
+    other_order = create_ready_order(
+        api_client,
+        other_restaurant_id,
+        other_branch_id,
+        other_owner_headers,
+    )
+    cross_collect_response = api_client.post(
+        f"/api/v1/restaurants/{other_restaurant_id}/branches/{other_branch_id}/orders/{other_order['id']}/collect",
+        headers=first_owner_headers,
+    )
+    assert cross_collect_response.status_code == 403
+
+
+def test_cross_tenant_payment_kitchen_and_report_access_are_blocked(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    other = create_second_restaurant(db_session)
+    first_owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    other_owner_headers = login(api_client, "owner2@example.com", "ownerpassword")
+    first_restaurant_id = str(seeded_restaurant["restaurant"].id)
+    other_restaurant_id = str(other["restaurant"].id)
+    other_branch_id = str(other["branch"].id)
+
+    item = create_menu_item(api_client, other_restaurant_id, other_owner_headers)
+    order_response = api_client.post(
+        f"/api/v1/restaurants/{other_restaurant_id}/branches/{other_branch_id}/orders/cashier",
+        headers=other_owner_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert order_response.status_code == 201, order_response.text
+    order = order_response.json()
+
+    payment_response = api_client.post(
+        f"/api/v1/restaurants/{other_restaurant_id}/orders/{order['id']}/payments/cash/confirm",
+        headers=first_owner_headers,
+        json={"amount_received": "50.00"},
+    )
+    assert payment_response.status_code == 403
+
+    kitchen_response = api_client.get(
+        f"/api/v1/restaurants/{other_restaurant_id}/branches/{other_branch_id}/kitchen/board",
+        headers=first_owner_headers,
+    )
+    assert kitchen_response.status_code == 403
+
+    report_response = api_client.get(
+        f"/api/v1/restaurants/{other_restaurant_id}/reports/daily-sales",
+        headers=first_owner_headers,
+        params={"business_date": date.today().isoformat()},
+    )
+    assert report_response.status_code == 403
+
+    hidden_order_payment_response = api_client.post(
+        f"/api/v1/restaurants/{first_restaurant_id}/orders/{order['id']}/payments/cash/confirm",
+        headers=first_owner_headers,
+        json={"amount_received": "50.00"},
+    )
+    assert hidden_order_payment_response.status_code == 400
+
+
+def test_admin_can_cross_restaurant_boundary_for_platform_operations(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    other = create_second_restaurant(db_session)
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    other_restaurant_id = str(other["restaurant"].id)
+
+    list_response = api_client.get("/api/v1/restaurants/", headers=admin_headers)
+    assert list_response.status_code == 200
+    names = {restaurant["name"] for restaurant in list_response.json()}
+    assert {"Chicken Spot Test", "Burger Barn Test"}.issubset(names)
+
+    get_response = api_client.get(
+        f"/api/v1/restaurants/{other_restaurant_id}",
+        headers=admin_headers,
+    )
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "Burger Barn Test"

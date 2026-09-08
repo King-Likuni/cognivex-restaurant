@@ -1,0 +1,46 @@
+# Render Blueprint for the Cognivex backend.
+#
+# Use this for the API only. Keep PostgreSQL on Neon for the zero-budget path,
+# then paste the Neon pooled connection string into DATABASE_URL in Render.
+services:
+  - type: web
+    name: cognivex-restaurant-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /ready
+    autoDeployTrigger: off
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: VERSION
+        value: 0.1.0
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        value: ""
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "10080"
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_WEBHOOK_APP_SECRET
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        value: admin@cognivex.com
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+      - key: ENABLE_SAMPLE_DATA
+        value: "false"
+      - key: RUN_MIGRATIONS
+        value: "1"
+      - key: RUN_INITIAL_DATA
+        value: "0"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
