@@ -35,7 +35,7 @@ services:
         value: admin@cognivex.com
       - key: RhHWXjZtkJfFZG7kOfzfiGgmdYqAtkt-
         sync: false
-      - key: ENABLE_SAMPLE_DATA
+           - key: ENABLE_SAMPLE_DATA
         value: "false"
       - key: RUN_MIGRATIONS
         value: "1"
@@ -43,5 +43,5 @@ services:
         value: "1"
       - key: WEB_CONCURRENCY
         value: "1"
-      - key: ["https://temporary.vercel.app"]
+      - key: BACKEND_CORS_ORIGINS
         sync: false
