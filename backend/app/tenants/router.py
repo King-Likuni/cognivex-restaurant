@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.auth.models import User
 from app.core.database import get_db
 from app.core.dependencies import (
     require_admin,
@@ -84,11 +85,14 @@ def create_branch(
 @router.get(
     "/{restaurant_id}/branches",
     response_model=list[BranchResponse],
-    dependencies=[Depends(require_restaurant_access)],
 )
-def list_branches(restaurant_id: UUID, db: Session = Depends(get_db)):
-    """List all active branches for a restaurant."""
-    return service.list_branches(db, restaurant_id)
+def list_branches(
+    restaurant_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_restaurant_access),
+):
+    """List branches the current user can operate for the restaurant."""
+    return service.list_accessible_branches(db, restaurant_id, current_user)
 
 
 # --------------------------------------------------------------------------- #

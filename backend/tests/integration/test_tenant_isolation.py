@@ -210,6 +210,43 @@ def test_cross_tenant_branch_and_order_operations_are_blocked(
     assert cross_collect_response.status_code == 403
 
 
+def test_cashier_branch_list_only_includes_assigned_branches(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    assigned_branch = seeded_restaurant["branch"]
+    other_branch = create_branch(
+        db_session,
+        restaurant.id,
+        BranchCreate(name="Airport Test", code="APT", location="Gaborone"),
+    )
+    create_user(
+        db_session,
+        UserCreate(
+            email="cashier@example.com",
+            password="cashierpassword",
+            first_name="Branch",
+            last_name="Cashier",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[assigned_branch.id],
+        ),
+    )
+    cashier_headers = login(api_client, "cashier@example.com", "cashierpassword")
+
+    response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/branches",
+        headers=cashier_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    branch_ids = {branch["id"] for branch in response.json()}
+    assert branch_ids == {str(assigned_branch.id)}
+    assert str(other_branch.id) not in branch_ids
+
+
 def test_cross_tenant_payment_kitchen_and_report_access_are_blocked(
     api_client: TestClient,
     db_session: Session,

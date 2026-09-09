@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.auth.models import User
 from app.tenants.models import Branch, Restaurant, RestaurantSettings
 from app.tenants.schemas import BranchCreate, RestaurantCreate, RestaurantSettingsUpdate
 
@@ -91,6 +92,26 @@ def list_branches(db: Session, restaurant_id: UUID) -> list[Branch]:
     return (
         db.query(Branch)
         .filter(Branch.restaurant_id == restaurant_id, Branch.is_active.is_(True))
+        .all()
+    )
+
+
+def list_accessible_branches(db: Session, restaurant_id: UUID, user: User) -> list[Branch]:
+    role_name = user.role.name if user.role else None
+    if role_name in {"ADMIN", "OWNER", "MANAGER"}:
+        return list_branches(db, restaurant_id)
+
+    assigned_branch_ids = [branch.id for branch in user.branches]
+    if not assigned_branch_ids:
+        return []
+
+    return (
+        db.query(Branch)
+        .filter(
+            Branch.restaurant_id == restaurant_id,
+            Branch.id.in_(assigned_branch_ids),
+            Branch.is_active.is_(True),
+        )
         .all()
     )
 
