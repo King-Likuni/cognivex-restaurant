@@ -15,7 +15,25 @@ type CartLine = {
   quantity: number;
 };
 
+const CHICKEN_SPOT_MAIN_MALL = {
+  restaurantId:
+    import.meta.env.VITE_PUBLIC_RESTAURANT_ID ?? "db74a923-21c7-442a-8937-71bde3d9aa9c",
+  branchId: import.meta.env.VITE_PUBLIC_BRANCH_ID ?? "2eebe040-5ec7-48d4-b89a-db407aefb864",
+};
+
 function readOrderRoute() {
+  const normalizedPath = window.location.pathname.replace(/\/$/, "");
+  if (normalizedPath === "/chicken-spot") {
+    return {
+      restaurantId:
+        localStorage.getItem("cognivex.publicRestaurantId") ??
+        CHICKEN_SPOT_MAIN_MALL.restaurantId,
+      branchId:
+        localStorage.getItem("cognivex.publicBranchId") ?? CHICKEN_SPOT_MAIN_MALL.branchId,
+      channel: "QR",
+    };
+  }
+
   const match = window.location.pathname.match(
     /^\/order\/restaurants\/([^/]+)\/branches\/([^/]+)\/?$/,
   );

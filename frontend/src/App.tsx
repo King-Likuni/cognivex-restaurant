@@ -313,7 +313,8 @@ function OperationsApp() {
 }
 
 function App() {
-  if (window.location.pathname.startsWith("/order/")) {
+  const normalizedPath = window.location.pathname.replace(/\/$/, "");
+  if (window.location.pathname.startsWith("/order/") || normalizedPath === "/chicken-spot") {
     return <CustomerOrderView />;
   }
   if (window.location.pathname.startsWith("/customer/")) {

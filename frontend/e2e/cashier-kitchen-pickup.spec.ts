@@ -188,8 +188,12 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
 test("customer can place a QR order and open the status page", async ({ page }) => {
   const { api, data } = await apiSetup();
 
-  await page.addInitScript(() => window.localStorage.clear());
-  await page.goto(`/order/restaurants/${data.restaurantId}/branches/${data.branchId}/`);
+  await page.addInitScript(({ restaurantId, branchId }) => {
+    window.localStorage.clear();
+    window.localStorage.setItem("cognivex.publicRestaurantId", restaurantId);
+    window.localStorage.setItem("cognivex.publicBranchId", branchId);
+  }, data);
+  await page.goto("/chicken-spot/");
 
   await expect(page.getByRole("heading", { name: /Chicken Spot/i })).toBeVisible();
   await page.getByTestId(`customer-add-${data.menuItem.id}`).click();
