@@ -38,6 +38,7 @@ export type AppContext = {
 type ViewKey = "cashier" | "kitchen" | "inventory" | "dashboard";
 
 const STORAGE_KEY = "cognivex.session";
+const BRANCH_STORAGE_KEY = "cognivex.branchId";
 
 const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = [
   { key: "cashier", label: "Cashier", icon: ShoppingCart },
@@ -118,6 +119,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
 function OperationsApp() {
   const [session, setSession] = useState<Session | null>(() => readStoredSession());
   const [context, setContext] = useState<AppContext | null>(null);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [view, setView] = useState<ViewKey>("cashier");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -164,7 +166,11 @@ function OperationsApp() {
       if (!branches.length) {
         throw new Error("No branches found");
       }
-      setContext({ restaurant, branch: branches[0] });
+      setBranches(branches);
+      const storedBranchId = localStorage.getItem(BRANCH_STORAGE_KEY);
+      const selectedBranch =
+        branches.find((branch) => branch.id === storedBranchId) ?? branches[0];
+      setContext({ restaurant, branch: selectedBranch });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load workspace");
     } finally {
@@ -197,6 +203,16 @@ function OperationsApp() {
     localStorage.removeItem(STORAGE_KEY);
     setSession(null);
     setContext(null);
+    setBranches([]);
+  }
+
+  function selectBranch(branchId: string) {
+    const selectedBranch = branches.find((branch) => branch.id === branchId);
+    if (!selectedBranch || !context) {
+      return;
+    }
+    localStorage.setItem(BRANCH_STORAGE_KEY, selectedBranch.id);
+    setContext({ ...context, branch: selectedBranch });
   }
 
   return (
@@ -238,15 +254,33 @@ function OperationsApp() {
             <p className="eyebrow">Live backend</p>
             <h1 data-testid="workspace-title">{title}</h1>
           </div>
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={() => setRefreshKey((current) => current + 1)}
-            title="Refresh"
-          >
-            <RefreshCw size={17} />
-            Refresh
-          </button>
+          <div className="topbar-actions">
+            {context ? (
+              <label className="branch-picker">
+                <span>Branch</span>
+                <select
+                  value={context.branch.id}
+                  onChange={(event) => selectBranch(event.target.value)}
+                  data-testid="branch-picker"
+                >
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => setRefreshKey((current) => current + 1)}
+              title="Refresh"
+            >
+              <RefreshCw size={17} />
+              Refresh
+            </button>
+          </div>
         </header>
 
         {error ? <Notice tone="error">{error}</Notice> : null}

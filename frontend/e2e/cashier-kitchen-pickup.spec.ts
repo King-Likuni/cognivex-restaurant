@@ -139,6 +139,7 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page.getByTestId("workspace-title")).toContainText("Chicken Spot");
+  await expect(page.getByTestId("branch-picker")).toHaveValue(data.branchId);
   await page.getByTestId(`menu-item-${data.menuItem.id}`).click();
   await page.getByTestId(`menu-item-${data.menuItem.id}`).click();
   await expect(page.getByTestId("cart-total")).toHaveText("BWP 110.00");
@@ -217,6 +218,7 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   await page.getByLabel("Password").fill(OWNER_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
 
+  await expect(page.getByTestId("branch-picker")).toHaveValue(data.branchId);
   await expect(page.getByTestId(`customer-order-${orderId}`)).toBeVisible();
   await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("Waiting for payment");
   await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("QR");
