@@ -7,6 +7,7 @@ import {
   LogOut,
   RefreshCw,
   ShoppingCart,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -17,6 +18,7 @@ import { CustomerStatusView } from "./customer/CustomerStatusView";
 import { BranchManagementView } from "./manager/BranchManagementView";
 import { InventoryView } from "./manager/InventoryView";
 import { DashboardView } from "./manager/DashboardView";
+import { StaffManagementView } from "./manager/StaffManagementView";
 import { KitchenView } from "./kitchen/KitchenView";
 import {
   apiRequest,
@@ -37,7 +39,7 @@ export type AppContext = {
   branch: Branch;
 };
 
-type ViewKey = "cashier" | "kitchen" | "inventory" | "dashboard" | "branches";
+type ViewKey = "cashier" | "kitchen" | "inventory" | "dashboard" | "branches" | "staff";
 
 const STORAGE_KEY = "cognivex.session";
 const BRANCH_STORAGE_KEY = "cognivex.branchId";
@@ -48,11 +50,12 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
   { key: "inventory", label: "Inventory", icon: Boxes },
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "branches", label: "Branches", icon: Building2 },
+  { key: "staff", label: "Staff", icon: Users },
 ];
 
 const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
-  ADMIN: ["branches"],
-  OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches"],
+  ADMIN: ["branches", "staff"],
+  OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier"],
   KITCHEN: ["kitchen"],
@@ -331,6 +334,9 @@ function OperationsApp() {
                 token={token}
                 onBranchesChanged={() => setRefreshKey((current) => current + 1)}
               />
+            ) : null}
+            {view === "staff" && visibleNavItems.some((item) => item.key === "staff") ? (
+              <StaffManagementView context={context} token={token} branches={branchOptions} />
             ) : null}
           </>
         ) : null}

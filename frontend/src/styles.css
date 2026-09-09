@@ -319,6 +319,7 @@ button:disabled {
 .data-list,
 .event-list,
 .branch-admin-list,
+.staff-list,
 .customer-menu-stack,
 .customer-menu-list {
   display: grid;
@@ -424,28 +425,69 @@ button:disabled {
   padding: 14px;
 }
 
-.branch-admin-heading {
+.branch-admin-heading,
+.staff-heading {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 }
 
-.branch-admin-heading div {
+.branch-admin-heading div,
+.staff-heading div {
   display: grid;
   min-width: 0;
 }
 
-.branch-admin-heading span:not(.status-pill) {
+.branch-admin-heading span:not(.status-pill),
+.staff-heading span:not(.status-pill) {
   color: #667286;
   font-size: 12px;
   font-weight: 800;
 }
 
-.branch-admin-grid {
+.branch-admin-grid,
+.staff-edit-grid {
   display: grid;
   grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.7fr) minmax(180px, 1fr);
   gap: 12px;
+}
+
+.staff-row {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 14px;
+}
+
+.staff-form {
+  display: grid;
+  gap: 12px;
+}
+
+.branch-checklist {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.branch-checklist legend {
+  color: #526071;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.branch-checklist label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #263244;
+  font-weight: 700;
 }
 
 .customer-link-row {
@@ -759,11 +801,13 @@ button:disabled {
   .toolbar-line,
   .order-card-header,
   .branch-admin-heading,
+  .staff-heading,
   .order-meta,
   .customer-link-row,
   .button-row,
   .compact-form,
-  .branch-admin-grid {
+  .branch-admin-grid,
+  .staff-edit-grid {
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;

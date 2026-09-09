@@ -23,6 +23,17 @@ class UserCreate(BaseModel):
     branch_ids: list[UUID] = Field(default_factory=list)
 
 
+class UserUpdate(BaseModel):
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
+    role_name: str | None = Field(
+        default=None,
+        description="One of: OWNER, MANAGER, CASHIER, KITCHEN",
+    )
+    branch_ids: list[UUID] | None = None
+    is_active: bool | None = None
+
+
 # --------------------------------------------------------------------------- #
 # Response schemas
 # --------------------------------------------------------------------------- #
@@ -39,6 +50,7 @@ class UserResponse(BaseModel):
     is_active: bool
     role_name: str | None = None
     restaurant_id: UUID | None = None
+    branch_ids: list[UUID] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

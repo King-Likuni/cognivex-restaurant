@@ -478,3 +478,169 @@ def test_owner_cannot_create_user_for_another_restaurant(
     )
 
     assert response.status_code == 403
+
+
+def test_manager_cannot_create_staff_users(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    create_user(
+        db_session,
+        UserCreate(
+            email="staff-manager@example.com",
+            password="managerpassword",
+            first_name="Staff",
+            last_name="Manager",
+            role_name="MANAGER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    manager_headers = login(api_client, "staff-manager@example.com", "managerpassword")
+
+    response = api_client.post(
+        "/api/v1/auth/users",
+        headers=manager_headers,
+        json={
+            "email": "manager-created-cashier@example.com",
+            "password": "cashierpassword",
+            "first_name": "Manager",
+            "last_name": "Cashier",
+            "role_name": "CASHIER",
+            "restaurant_id": str(restaurant.id),
+            "branch_ids": [str(branch.id)],
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_owner_can_manage_restaurant_staff(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    second_branch = create_branch(
+        db_session,
+        restaurant.id,
+        BranchCreate(name="University Test", code="UB", location="Gaborone"),
+    )
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    create_response = api_client.post(
+        "/api/v1/auth/users",
+        headers=owner_headers,
+        json={
+            "email": "managed-cashier@example.com",
+            "password": "cashierpassword",
+            "first_name": "Managed",
+            "last_name": "Cashier",
+            "role_name": "CASHIER",
+            "restaurant_id": str(restaurant.id),
+            "branch_ids": [str(branch.id)],
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    cashier = create_response.json()
+    assert cashier["branch_ids"] == [str(branch.id)]
+
+    list_response = api_client.get(
+        "/api/v1/auth/users",
+        headers=owner_headers,
+        params={"restaurant_id": str(restaurant.id)},
+    )
+    assert list_response.status_code == 200, list_response.text
+    assert {user["email"] for user in list_response.json()} >= {
+        "owner@example.com",
+        "managed-cashier@example.com",
+    }
+
+    update_response = api_client.patch(
+        f"/api/v1/auth/users/{cashier['id']}",
+        headers=owner_headers,
+        json={
+            "role_name": "KITCHEN",
+            "branch_ids": [str(second_branch.id)],
+            "is_active": False,
+        },
+    )
+    assert update_response.status_code == 200, update_response.text
+    updated_cashier = update_response.json()
+    assert updated_cashier["role_name"] == "KITCHEN"
+    assert updated_cashier["branch_ids"] == [str(second_branch.id)]
+    assert updated_cashier["is_active"] is False
+
+    login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "managed-cashier@example.com", "password": "cashierpassword"},
+    )
+    assert login_response.status_code == 401
+
+
+def test_owner_cannot_manage_staff_for_another_restaurant(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    other = create_second_restaurant(db_session)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    list_response = api_client.get(
+        "/api/v1/auth/users",
+        headers=owner_headers,
+        params={"restaurant_id": str(other["restaurant"].id)},
+    )
+    assert list_response.status_code == 403
+
+    update_response = api_client.patch(
+        f"/api/v1/auth/users/{other['cashier'].id}",
+        headers=owner_headers,
+        json={"is_active": False},
+    )
+    assert update_response.status_code == 403
+
+
+def test_owner_cannot_deactivate_last_active_owner(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    owner = seeded_restaurant["owner"]
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    response = api_client.patch(
+        f"/api/v1/auth/users/{owner.id}",
+        headers=owner_headers,
+        json={"is_active": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "You cannot deactivate your own account"
+
+
+def test_admin_cannot_remove_last_active_restaurant_owner(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    owner = seeded_restaurant["owner"]
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+
+    deactivate_response = api_client.patch(
+        f"/api/v1/auth/users/{owner.id}",
+        headers=admin_headers,
+        json={"is_active": False},
+    )
+    assert deactivate_response.status_code == 400
+    assert deactivate_response.json()["detail"] == "At least one active owner is required"
+
+    demote_response = api_client.patch(
+        f"/api/v1/auth/users/{owner.id}",
+        headers=admin_headers,
+        json={"role_name": "MANAGER"},
+    )
+    assert demote_response.status_code == 400
+    assert demote_response.json()["detail"] == "At least one active owner is required"

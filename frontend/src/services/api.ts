@@ -11,6 +11,7 @@ export type User = {
   is_active: boolean;
   role_name: RoleName | null;
   restaurant_id: string | null;
+  branch_ids: string[];
 };
 
 export type Restaurant = {
