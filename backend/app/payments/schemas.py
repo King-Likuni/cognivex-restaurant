@@ -16,6 +16,11 @@ class CashPaymentConfirmRequest(BaseModel):
     amount_received: Decimal = Field(..., gt=Decimal("0.00"))
 
 
+class MobileTransferConfirmRequest(BaseModel):
+    amount_received: Decimal = Field(..., gt=Decimal("0.00"))
+    provider_transaction_id: str | None = Field(default=None, max_length=120)
+
+
 class PaymentResponse(BaseModel):
     id: UUID
     order_id: UUID

@@ -162,6 +162,56 @@ def test_remote_payment_initiation_and_paid_webhook_are_idempotent(
     ]
 
 
+def test_mobile_transfer_payment_can_be_manually_confirmed(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    headers = login(api_client, "owner@example.com", "ownerpassword")
+    item = create_menu_item(api_client, restaurant_id, headers)
+    order = create_order(api_client, restaurant_id, branch_id, headers, item["id"])
+
+    initiate_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments",
+        headers=headers,
+        json={"provider": "ORANGE_MONEY", "customer_phone_number": "+26770000000"},
+    )
+    assert initiate_response.status_code == 201, initiate_response.text
+    payment = initiate_response.json()
+    assert payment["status"] == PaymentStatus.PENDING.value
+
+    confirm_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
+        headers=headers,
+        json={
+            "amount_received": "55.00",
+            "provider_transaction_id": "manual-om-txn-001",
+        },
+    )
+    assert confirm_response.status_code == 201, confirm_response.text
+    confirmed_payment = confirm_response.json()
+    assert confirmed_payment["provider"] == "ORANGE_MONEY"
+    assert confirmed_payment["status"] == PaymentStatus.PAID.value
+    assert confirmed_payment["provider_transaction_id"] == "manual-om-txn-001"
+
+    order_record = db_session.query(Order).filter(Order.id == UUID(order["id"])).one()
+    assert order_record.payment_status == PaymentStatus.PAID.value
+    assert order_record.order_status == OrderStatus.QUEUED.value
+
+    events = (
+        db_session.query(PaymentEvent)
+        .filter(PaymentEvent.payment_id == UUID(payment["id"]))
+        .order_by(PaymentEvent.created_at)
+        .all()
+    )
+    assert [event.event_type for event in events] == [
+        "PAYMENT_INITIATED",
+        "ORANGE_MONEY_MANUAL_CONFIRMED",
+    ]
+
+
 def test_payment_webhook_rejects_invalid_signature(
     api_client: TestClient,
     seeded_restaurant: dict[str, object],

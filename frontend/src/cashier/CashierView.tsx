@@ -41,6 +41,12 @@ type CustomerStatusLink = {
   expiresInSeconds: number;
 };
 
+type MobileTransferConfirmation = {
+  orderId: string;
+  amountReceived: string;
+  transactionId: string;
+};
+
 const CUSTOMER_CHANNELS = new Set(["QR", "WHATSAPP"]);
 const CLOSED_ORDER_STATUSES = new Set([
   "COLLECTED",
@@ -75,6 +81,8 @@ export function CashierView({ context, token }: Props) {
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [remotePayment, setRemotePayment] = useState<Payment | null>(null);
   const [customerStatusLink, setCustomerStatusLink] = useState<CustomerStatusLink | null>(null);
+  const [mobileTransferConfirmation, setMobileTransferConfirmation] =
+    useState<MobileTransferConfirmation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -285,6 +293,45 @@ export function CashierView({ context, token }: Props) {
     }
   }
 
+  function startMobileTransferConfirmation(order: Order) {
+    setMobileTransferConfirmation({
+      orderId: order.id,
+      amountReceived: order.total,
+      transactionId: "",
+    });
+    setError(null);
+    setNotice(null);
+  }
+
+  async function confirmMobileTransfer(order: Order) {
+    if (!mobileTransferConfirmation || mobileTransferConfirmation.orderId !== order.id) {
+      return;
+    }
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiRequest<Payment>(
+        `/api/v1/restaurants/${context.restaurant.id}/orders/${order.id}/payments/mobile-transfer/confirm`,
+        {
+          method: "POST",
+          token,
+          body: {
+            amount_received: mobileTransferConfirmation.amountReceived,
+            provider_transaction_id: mobileTransferConfirmation.transactionId.trim() || null,
+          },
+        },
+      );
+      setMobileTransferConfirmation(null);
+      setNotice(`${order.display_number} mobile transfer confirmed`);
+      await loadOrderDesk();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not confirm mobile transfer");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function copyCustomerLink() {
     if (!customerStatusLink) {
       return;
@@ -433,6 +480,54 @@ export function CashierView({ context, token }: Props) {
               data-testid={`customer-order-${order.id}`}
               key={order.id}
             >
+              {mobileTransferConfirmation?.orderId === order.id ? (
+                <form
+                  className="transfer-confirmation"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void confirmMobileTransfer(order);
+                  }}
+                >
+                  <Field label="Amount received">
+                    <input
+                      value={mobileTransferConfirmation.amountReceived}
+                      onChange={(event) =>
+                        setMobileTransferConfirmation({
+                          ...mobileTransferConfirmation,
+                          amountReceived: event.target.value,
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Transfer reference">
+                    <input
+                      value={mobileTransferConfirmation.transactionId}
+                      onChange={(event) =>
+                        setMobileTransferConfirmation({
+                          ...mobileTransferConfirmation,
+                          transactionId: event.target.value,
+                        })
+                      }
+                      placeholder="SMS or transfer ID"
+                    />
+                  </Field>
+                  <div className="button-row">
+                    <button className="secondary-action" type="submit" disabled={isBusy}>
+                      <CheckCircle2 size={17} />
+                      Confirm
+                    </button>
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => setMobileTransferConfirmation(null)}
+                      disabled={isBusy}
+                    >
+                      <XCircle size={17} />
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : null}
               <div className="order-card-header">
                 <span className="status-pill">
                   {order.payment_status === "PAID" ? (
@@ -450,6 +545,17 @@ export function CashierView({ context, token }: Props) {
                 <span>{order.payment_status}</span>
                 <strong>{formatMoney(order.total, order.currency)}</strong>
               </div>
+              {order.payment_status !== "PAID" ? (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => startMobileTransferConfirmation(order)}
+                  disabled={isBusy}
+                >
+                  <Banknote size={17} />
+                  Confirm transfer
+                </button>
+              ) : null}
             </article>
           ))}
           {!customerOrders.length ? (

@@ -15,6 +15,7 @@ from app.core.webhooks import verify_hmac_signature
 from app.payments import service
 from app.payments.schemas import (
     CashPaymentConfirmRequest,
+    MobileTransferConfirmRequest,
     PaymentInitiateRequest,
     PaymentResponse,
     PaymentWebhookResponse,
@@ -67,6 +68,32 @@ def confirm_cash_payment(
             restaurant_id=restaurant_id,
             order_id=order_id,
             amount_received=data.amount_received,
+            confirmed_by=current_user,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{order_id}/payments/mobile-transfer/confirm",
+    response_model=PaymentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def confirm_mobile_transfer_payment(
+    restaurant_id: UUID,
+    order_id: UUID,
+    data: MobileTransferConfirmRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_cashier),
+):
+    ensure_restaurant_access(current_user, restaurant_id)
+    try:
+        return service.confirm_mobile_transfer_payment(
+            db=db,
+            restaurant_id=restaurant_id,
+            order_id=order_id,
+            amount_received=data.amount_received,
+            provider_transaction_id=data.provider_transaction_id,
             confirmed_by=current_user,
         )
     except ValueError as exc:

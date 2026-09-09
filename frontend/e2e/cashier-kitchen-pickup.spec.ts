@@ -223,5 +223,11 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("Waiting for payment");
   await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("QR");
 
+  const customerOrder = page.getByTestId(`customer-order-${orderId}`);
+  await customerOrder.getByRole("button", { name: "Confirm transfer" }).click();
+  await customerOrder.getByLabel("Transfer reference").fill(`e2e-transfer-${Date.now()}`);
+  await customerOrder.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(customerOrder).toContainText("Paid, waiting for kitchen");
+
   await api.dispose();
 });

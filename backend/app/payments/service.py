@@ -12,7 +12,7 @@ from app.orders.enums import OrderStatus, PaymentStatus
 from app.orders.models import Order
 from app.orders.service import transition_order
 from app.payments.models import Payment, PaymentEvent
-from app.payments.providers import PaymentRequest, get_payment_provider
+from app.payments.providers import REMOTE_PAYMENT_PROVIDERS, PaymentRequest, get_payment_provider
 from app.realtime.events import publish_order_event
 
 
@@ -299,6 +299,96 @@ def confirm_cash_payment(
     )
 
     order.payment_status = PaymentStatus.PAID.value
+    transition_order(db, order, OrderStatus.CONFIRMED, confirmed_by, commit=False)
+    transition_order(db, order, OrderStatus.QUEUED, confirmed_by, commit=False)
+
+    db.commit()
+    db.refresh(payment)
+    db.refresh(order)
+    publish_order_event(order, "ORDER_PAYMENT_CONFIRMED")
+    return payment
+
+
+def confirm_mobile_transfer_payment(
+    db: Session,
+    restaurant_id: UUID,
+    order_id: UUID,
+    amount_received: Decimal,
+    confirmed_by: User,
+    provider_transaction_id: str | None = None,
+) -> Payment:
+    order = get_order_for_payment(db, restaurant_id, order_id)
+    if order is None:
+        raise ValueError("Order not found")
+    if order.payment is None:
+        raise ValueError("Remote payment has not been initiated for this order")
+
+    payment = order.payment
+    if payment.provider not in REMOTE_PAYMENT_PROVIDERS:
+        raise ValueError("Only mobile transfer payments can be manually confirmed here")
+    if payment.status == PaymentStatus.PAID.value:
+        raise ValueError("Order is already paid")
+    if order.order_status != OrderStatus.PENDING_PAYMENT.value:
+        raise ValueError("Mobile transfer can only be confirmed for pending-payment orders")
+    if amount_received < Decimal(order.total):
+        raise ValueError("Amount received is less than order total")
+
+    normalized_transaction_id = provider_transaction_id.strip() if provider_transaction_id else None
+    if normalized_transaction_id:
+        existing_transaction = (
+            db.query(Payment)
+            .filter(
+                Payment.provider == payment.provider,
+                Payment.provider_transaction_id == normalized_transaction_id,
+                Payment.id != payment.id,
+            )
+            .first()
+        )
+        if existing_transaction is not None:
+            raise ValueError("Transaction reference is already assigned to another payment")
+
+    previous_payment_status = payment.status
+    previous_order_status = order.order_status
+    payment.status = PaymentStatus.PAID.value
+    payment.completed_at = datetime.now(UTC)
+    payment.provider_transaction_id = normalized_transaction_id
+    order.payment_status = PaymentStatus.PAID.value
+
+    db.add(
+        PaymentEvent(
+            payment_id=payment.id,
+            provider_event_id=normalized_transaction_id,
+            event_type=f"{payment.provider}_MANUAL_CONFIRMED",
+            payload={
+                "amount_received": str(amount_received),
+                "order_total": str(order.total),
+                "confirmed_by": str(confirmed_by.id),
+                "provider_transaction_id": normalized_transaction_id,
+            },
+        )
+    )
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant_id,
+            user_id=confirmed_by.id,
+            action="MOBILE_TRANSFER_PAYMENT_CONFIRMED",
+            entity_type="order",
+            entity_id=order.id,
+            old_values={
+                "payment_status": previous_payment_status,
+                "order_status": previous_order_status,
+            },
+            new_values={
+                "provider": payment.provider,
+                "payment_status": PaymentStatus.PAID.value,
+                "order_status": OrderStatus.QUEUED.value,
+                "amount_received": str(amount_received),
+                "amount_paid": str(order.total),
+                "provider_transaction_id": normalized_transaction_id,
+            },
+        )
+    )
+
     transition_order(db, order, OrderStatus.CONFIRMED, confirmed_by, commit=False)
     transition_order(db, order, OrderStatus.QUEUED, confirmed_by, commit=False)
 

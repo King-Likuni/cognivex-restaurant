@@ -411,6 +411,15 @@ button:disabled {
   padding: 10px;
 }
 
+.transfer-confirmation {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #c4e6d2;
+  border-radius: 8px;
+  background: #effaf3;
+  padding: 12px;
+}
+
 .customer-link-row a {
   color: #176b49;
   font-weight: 800;
