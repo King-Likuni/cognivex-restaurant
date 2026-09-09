@@ -1,4 +1,4 @@
-import { CreditCard, Minus, Plus, ReceiptText, RefreshCw } from "lucide-react";
+import { Copy, CreditCard, Minus, Plus, ReceiptText, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { EmptyState, Field, Notice, Panel } from "../components/ui";
@@ -35,6 +35,7 @@ export function CustomerOrderView() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [orderResult, setOrderResult] = useState<PublicCustomerOrderResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const menuItems = useMemo(() => {
@@ -122,11 +123,24 @@ export function CustomerOrderView() {
         },
       );
       setOrderResult(result);
+      setCopyNotice(null);
       setCart([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not place order");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function copyPaymentReference() {
+    if (!orderResult) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(orderResult.payment.reference);
+      setCopyNotice("Payment reference copied");
+    } catch {
+      setCopyNotice("Copy failed. Long-press or select the reference instead.");
     }
   }
 
@@ -143,9 +157,8 @@ export function CustomerOrderView() {
         {error ? <Notice tone="error">{error}</Notice> : null}
         {orderResult ? (
           <Notice tone="success">
-            {orderResult.order.display_number} created. Payment reference:{" "}
-            <strong>{orderResult.payment.reference}</strong>. Use this exact reference when you send
-            payment.
+            {orderResult.order.display_number} created. Use payment reference{" "}
+            <strong>{orderResult.payment.reference}</strong> when you send the transfer.
           </Notice>
         ) : null}
         <form className="customer-order-grid" onSubmit={submitOrder}>
@@ -197,6 +210,30 @@ export function CustomerOrderView() {
           </div>
 
           <div className="customer-checkout">
+            {orderResult ? (
+              <div className="payment-instructions" data-testid="customer-payment-instructions">
+                <span className="status-pill">Payment reference created</span>
+                <div className="payment-reference-block">
+                  <small>Use this exact reference</small>
+                  <strong data-testid="customer-payment-reference">
+                    {orderResult.payment.reference}
+                  </strong>
+                </div>
+                <div className="payment-detail-row">
+                  <span>Order</span>
+                  <strong>{orderResult.order.display_number}</strong>
+                </div>
+                <div className="payment-detail-row">
+                  <span>Amount</span>
+                  <strong>{formatMoney(orderResult.order.total, orderResult.order.currency)}</strong>
+                </div>
+                <button className="secondary-action" type="button" onClick={copyPaymentReference}>
+                  <Copy size={17} />
+                  Copy reference
+                </button>
+                {copyNotice ? <Notice tone="success">{copyNotice}</Notice> : null}
+              </div>
+            ) : null}
             <Field label="Name">
               <input
                 value={customerName}
@@ -223,7 +260,7 @@ export function CustomerOrderView() {
               disabled={isSubmitting || !cart.length}
             >
               <CreditCard size={18} />
-              {isSubmitting ? "Placing order" : "Pay with Orange Money"}
+              {isSubmitting ? "Creating reference" : "Create order and payment reference"}
             </button>
             {orderResult ? (
               <a

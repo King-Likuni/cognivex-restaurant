@@ -198,9 +198,14 @@ test("customer can place a QR order and open the status page", async ({ page }) 
 
   await page.getByLabel("Name").fill("QR Test Customer");
   await page.getByLabel("Phone number").fill("+26771112222");
-  await page.getByRole("button", { name: "Pay with Orange Money" }).click();
+  await page.getByRole("button", { name: "Create order and payment reference" }).click();
 
-  await expect(page.getByText(/created\. Payment reference:/i)).toBeVisible();
+  await expect(page.getByText(/created\. Use payment reference/i)).toBeVisible();
+  await expect(page.getByTestId("customer-payment-instructions")).toBeVisible();
+  const customerPaymentReference = (
+    await page.getByTestId("customer-payment-reference").innerText()
+  ).trim();
+  expect(customerPaymentReference).toMatch(/^[A-Z0-9]+-[A-Z0-9]+-\d{6}-\d{3}$/);
   const statusLink = page.getByTestId("customer-status-link");
   await expect(statusLink).toBeVisible();
   await expect(statusLink).toHaveAttribute("href", /\/customer\/restaurants\//);
@@ -225,8 +230,7 @@ test("customer can place a QR order and open the status page", async ({ page }) 
 
   const customerOrder = page.getByTestId(`customer-order-${orderId}`);
   await customerOrder.getByRole("button", { name: "Confirm transfer" }).click();
-  const paymentReference = (await customerOrder.locator("p").first().innerText()).trim();
-  await customerOrder.getByLabel("Payment reference used").fill(paymentReference);
+  await customerOrder.getByLabel("Payment reference used").fill(customerPaymentReference);
   await customerOrder.getByLabel("Transfer reference").fill(`e2e-transfer-${Date.now()}`);
   await customerOrder.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(customerOrder).toContainText("Paid, waiting for kitchen");

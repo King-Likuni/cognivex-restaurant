@@ -420,6 +420,44 @@ button:disabled {
   padding: 12px;
 }
 
+.payment-instructions {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #b7dec7;
+  border-radius: 8px;
+  background: #effaf3;
+  padding: 12px;
+}
+
+.payment-reference-block {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #c4e6d2;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.payment-reference-block small,
+.payment-detail-row span {
+  color: #526071;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.payment-reference-block strong {
+  overflow-wrap: anywhere;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.payment-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .customer-link-row a {
   color: #176b49;
   font-weight: 800;
