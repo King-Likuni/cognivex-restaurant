@@ -316,7 +316,6 @@ def confirm_mobile_transfer_payment(
     amount_received: Decimal,
     confirmed_by: User,
     payment_reference_used: str,
-    provider_transaction_id: str | None = None,
 ) -> Payment:
     order = get_order_for_payment(db, restaurant_id, order_id)
     if order is None:
@@ -338,38 +337,22 @@ def confirm_mobile_transfer_payment(
     if normalized_payment_reference != order.payment_reference.upper():
         raise ValueError("Payment reference does not match this order")
 
-    normalized_transaction_id = provider_transaction_id.strip() if provider_transaction_id else None
-    if normalized_transaction_id:
-        existing_transaction = (
-            db.query(Payment)
-            .filter(
-                Payment.provider == payment.provider,
-                Payment.provider_transaction_id == normalized_transaction_id,
-                Payment.id != payment.id,
-            )
-            .first()
-        )
-        if existing_transaction is not None:
-            raise ValueError("Transaction reference is already assigned to another payment")
-
     previous_payment_status = payment.status
     previous_order_status = order.order_status
     payment.status = PaymentStatus.PAID.value
     payment.completed_at = datetime.now(UTC)
-    payment.provider_transaction_id = normalized_transaction_id
     order.payment_status = PaymentStatus.PAID.value
 
     db.add(
         PaymentEvent(
             payment_id=payment.id,
-            provider_event_id=normalized_transaction_id,
+            provider_event_id=normalized_payment_reference,
             event_type=f"{payment.provider}_MANUAL_CONFIRMED",
             payload={
                 "amount_received": str(amount_received),
                 "order_total": str(order.total),
                 "confirmed_by": str(confirmed_by.id),
                 "payment_reference_used": normalized_payment_reference,
-                "provider_transaction_id": normalized_transaction_id,
             },
         )
     )
@@ -391,7 +374,6 @@ def confirm_mobile_transfer_payment(
                 "amount_received": str(amount_received),
                 "amount_paid": str(order.total),
                 "payment_reference_used": normalized_payment_reference,
-                "provider_transaction_id": normalized_transaction_id,
             },
         )
     )

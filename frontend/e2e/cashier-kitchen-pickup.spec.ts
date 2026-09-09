@@ -231,7 +231,6 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   const customerOrder = page.getByTestId(`customer-order-${orderId}`);
   await customerOrder.getByRole("button", { name: "Confirm transfer" }).click();
   await customerOrder.getByLabel("Payment reference used").fill(customerPaymentReference);
-  await customerOrder.getByLabel("Transfer reference").fill(`e2e-transfer-${Date.now()}`);
   await customerOrder.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(customerOrder).toContainText("Paid, waiting for kitchen");
 

@@ -188,14 +188,13 @@ def test_mobile_transfer_payment_can_be_manually_confirmed(
         json={
             "amount_received": "55.00",
             "payment_reference_used": order["payment_reference"],
-            "provider_transaction_id": "manual-om-txn-001",
         },
     )
     assert confirm_response.status_code == 201, confirm_response.text
     confirmed_payment = confirm_response.json()
     assert confirmed_payment["provider"] == "ORANGE_MONEY"
     assert confirmed_payment["status"] == PaymentStatus.PAID.value
-    assert confirmed_payment["provider_transaction_id"] == "manual-om-txn-001"
+    assert confirmed_payment["provider_transaction_id"] is None
 
     order_record = db_session.query(Order).filter(Order.id == UUID(order["id"])).one()
     assert order_record.payment_status == PaymentStatus.PAID.value
@@ -236,7 +235,6 @@ def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
         json={
             "amount_received": "55.00",
             "payment_reference_used": "WRONG-REFERENCE",
-            "provider_transaction_id": "manual-wrong-ref-001",
         },
     )
     assert confirm_response.status_code == 400

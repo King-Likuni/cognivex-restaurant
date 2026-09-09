@@ -19,7 +19,6 @@ class CashPaymentConfirmRequest(BaseModel):
 class MobileTransferConfirmRequest(BaseModel):
     amount_received: Decimal = Field(..., gt=Decimal("0.00"))
     payment_reference_used: str = Field(..., min_length=1, max_length=80)
-    provider_transaction_id: str | None = Field(default=None, max_length=120)
 
 
 class PaymentResponse(BaseModel):

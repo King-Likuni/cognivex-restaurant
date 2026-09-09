@@ -45,7 +45,6 @@ type MobileTransferConfirmation = {
   orderId: string;
   amountReceived: string;
   paymentReferenceUsed: string;
-  transactionId: string;
 };
 
 const CUSTOMER_CHANNELS = new Set(["QR", "WHATSAPP"]);
@@ -299,7 +298,6 @@ export function CashierView({ context, token }: Props) {
       orderId: order.id,
       amountReceived: order.total,
       paymentReferenceUsed: "",
-      transactionId: "",
     });
     setError(null);
     setNotice(null);
@@ -321,7 +319,6 @@ export function CashierView({ context, token }: Props) {
           body: {
             amount_received: mobileTransferConfirmation.amountReceived,
             payment_reference_used: mobileTransferConfirmation.paymentReferenceUsed,
-            provider_transaction_id: mobileTransferConfirmation.transactionId.trim() || null,
           },
         },
       );
@@ -512,18 +509,6 @@ export function CashierView({ context, token }: Props) {
                         })
                       }
                       placeholder={order.payment_reference}
-                    />
-                  </Field>
-                  <Field label="Transfer reference">
-                    <input
-                      value={mobileTransferConfirmation.transactionId}
-                      onChange={(event) =>
-                        setMobileTransferConfirmation({
-                          ...mobileTransferConfirmation,
-                          transactionId: event.target.value,
-                        })
-                      }
-                      placeholder="SMS or transfer ID"
                     />
                   </Field>
                   <div className="button-row">
