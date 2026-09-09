@@ -38,6 +38,12 @@ type DailySalesReport = {
   revenue: string;
 };
 
+type StaffInviteResponse = {
+  invite: {
+    setup_url_path: string;
+  };
+};
+
 type TestData = {
   token: string;
   restaurantId: string;
@@ -184,6 +190,45 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await expect(page.getByText("Revenue counts paid collected orders only.")).toBeVisible();
   await expect(page.getByTestId("stat-collected")).toContainText(String(expectedCollectedOrders));
   await expect(page.getByTestId("stat-revenue")).toContainText(`BWP ${expectedRevenue}`);
+
+  await api.dispose();
+});
+
+test("invited staff can set a password and sign in", async ({ page }) => {
+  const { api, data } = await apiSetup();
+  const headers = { Authorization: `Bearer ${data.token}` };
+  const email = `invited-e2e-${Date.now()}@example.com`;
+  const password = "newstaffpassword";
+
+  const inviteResponse = await api.post("/api/v1/auth/users/invite", {
+    headers,
+    data: {
+      email,
+      first_name: "Invited",
+      last_name: "Cashier",
+      role_name: "CASHIER",
+      restaurant_id: data.restaurantId,
+      branch_ids: [data.branchId],
+    },
+  });
+  expect(inviteResponse.ok(), await inviteResponse.text()).toBeTruthy();
+  const invite = (await inviteResponse.json()) as StaffInviteResponse;
+
+  await page.addInitScript(() => window.localStorage.clear());
+  await page.goto(invite.invite.setup_url_path);
+  await expect(page.getByText(email)).toBeVisible();
+  await page.getByLabel("New password").fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Set password" }).click();
+  await expect(page.getByText("Password updated")).toBeVisible();
+
+  await page.getByRole("link", { name: "Sign in" }).click();
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-title")).toContainText("Chicken Spot");
+  await expect(page.getByRole("button", { name: "Cashier" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Staff" })).toBeHidden();
 
   await api.dispose();
 });

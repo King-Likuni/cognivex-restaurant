@@ -7,9 +7,15 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.auth import service
-from app.auth.models import User
+from app.auth.models import PasswordResetToken, User
 from app.auth.schemas import (
     LoginResponse,
+    MessageResponse,
+    PasswordSetupConfirm,
+    PasswordSetupPreviewResponse,
+    PasswordSetupTokenResponse,
+    StaffInviteCreate,
+    StaffInviteResponse,
     UserCreate,
     UserResponse,
     UserUpdate,
@@ -37,6 +43,17 @@ def serialize_user(user: User) -> UserResponse:
         role_name=user.role.name if user.role else None,
         restaurant_id=user.restaurant_id,
         branch_ids=[branch.id for branch in user.branches],
+    )
+
+
+def serialize_password_setup_token(
+    reset_token: PasswordResetToken,
+    raw_token: str,
+) -> PasswordSetupTokenResponse:
+    return PasswordSetupTokenResponse(
+        token=raw_token,
+        setup_url_path=f"/password-setup?token={raw_token}",
+        expires_at=reset_token.expires_at,
     )
 
 
@@ -163,6 +180,46 @@ def create_user(
     )
 
 
+@router.post(
+    "/users/invite",
+    response_model=StaffInviteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_user_invite(
+    user_in: StaffInviteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_creator),
+):
+    """Create staff and return a one-time password setup link."""
+    current_role = current_user.role.name if current_user.role else None
+    requested_role = user_in.role_name.upper()
+    if current_role != "ADMIN":
+        if requested_role == "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Restaurant users cannot create platform admins",
+            )
+        if user_in.restaurant_id is not None:
+            ensure_restaurant_access(current_user, user_in.restaurant_id)
+
+    try:
+        user, reset_token, raw_token = service.create_user_invite(
+            db,
+            user_in,
+            created_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+    return StaffInviteResponse(
+        user=serialize_user(user),
+        invite=serialize_password_setup_token(reset_token, raw_token),
+    )
+
+
 @router.get("/users", response_model=list[UserResponse])
 def list_users(
     restaurant_id: UUID | None = None,
@@ -214,3 +271,56 @@ def update_user(
         ) from e
 
     return serialize_user(updated_user)
+
+
+@router.post("/users/{user_id}/password-reset", response_model=PasswordSetupTokenResponse)
+def create_staff_password_reset(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_manager),
+):
+    """Create a one-time password setup link for an existing active staff member."""
+    user = service.get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    current_role = current_user.role.name if current_user.role else None
+    if current_role != "ADMIN":
+        ensure_restaurant_access(current_user, user.restaurant_id)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive users must be reactivated before password reset",
+        )
+
+    reset_token, raw_token = service.create_password_setup_token(
+        db,
+        user,
+        created_by=current_user.id,
+    )
+    return serialize_password_setup_token(reset_token, raw_token)
+
+
+@router.post("/password-setup/confirm", response_model=MessageResponse)
+def confirm_password_setup(data: PasswordSetupConfirm, db: Session = Depends(get_db)):
+    """Set a password using a valid one-time setup token."""
+    user = service.set_password_with_token(db, data.token, data.password)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Password setup link is invalid or expired")
+    return MessageResponse(detail="Password updated")
+
+
+@router.get("/password-setup/{token}", response_model=PasswordSetupPreviewResponse)
+def read_password_setup_token(token: str, db: Session = Depends(get_db)):
+    """Preview a valid password setup token without authenticating."""
+    reset_token = service.get_valid_password_setup_token(db, token)
+    if reset_token is None:
+        raise HTTPException(status_code=404, detail="Password setup link is invalid or expired")
+    user = reset_token.user
+    return PasswordSetupPreviewResponse(
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role_name=user.role.name if user.role else None,
+        expires_at=reset_token.expires_at,
+    )

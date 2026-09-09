@@ -41,7 +41,8 @@ button:disabled {
 }
 
 .customer-status-page,
-.customer-order-page {
+.customer-order-page,
+.password-setup-page {
   display: grid;
   width: min(760px, 100%);
   min-height: 100vh;
@@ -490,6 +491,32 @@ button:disabled {
   font-weight: 700;
 }
 
+.invite-link-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.invite-link-box input {
+  min-height: 40px;
+  border: 1px solid #cfd7e2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #18212f;
+  padding: 8px 10px;
+}
+
+.password-setup-complete {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.password-setup-complete a {
+  text-decoration: none;
+}
+
 .customer-link-row {
   justify-content: space-between;
   border: 1px solid #d7dde5;
@@ -806,6 +833,7 @@ button:disabled {
   .customer-link-row,
   .button-row,
   .compact-form,
+  .invite-link-box,
   .branch-admin-grid,
   .staff-edit-grid {
     align-items: stretch;

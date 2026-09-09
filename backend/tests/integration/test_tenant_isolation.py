@@ -582,6 +582,107 @@ def test_owner_can_manage_restaurant_staff(
     assert login_response.status_code == 401
 
 
+def test_owner_can_invite_staff_to_set_their_password(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    invite_response = api_client.post(
+        "/api/v1/auth/users/invite",
+        headers=owner_headers,
+        json={
+            "email": "invited-cashier@example.com",
+            "first_name": "Invited",
+            "last_name": "Cashier",
+            "role_name": "CASHIER",
+            "restaurant_id": str(restaurant.id),
+            "branch_ids": [str(branch.id)],
+        },
+    )
+    assert invite_response.status_code == 201, invite_response.text
+    invite = invite_response.json()
+    assert invite["user"]["email"] == "invited-cashier@example.com"
+    assert invite["invite"]["setup_url_path"].startswith("/password-setup?token=")
+    token = invite["invite"]["token"]
+
+    preview_response = api_client.get(f"/api/v1/auth/password-setup/{token}")
+    assert preview_response.status_code == 200, preview_response.text
+    assert preview_response.json()["email"] == "invited-cashier@example.com"
+
+    confirm_response = api_client.post(
+        "/api/v1/auth/password-setup/confirm",
+        json={"token": token, "password": "newcashierpassword"},
+    )
+    assert confirm_response.status_code == 200, confirm_response.text
+
+    login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "invited-cashier@example.com", "password": "newcashierpassword"},
+    )
+    assert login_response.status_code == 200, login_response.text
+
+    reuse_response = api_client.post(
+        "/api/v1/auth/password-setup/confirm",
+        json={"token": token, "password": "secondpassword"},
+    )
+    assert reuse_response.status_code == 404
+
+
+def test_new_password_setup_link_invalidates_previous_link(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    user = create_user(
+        db_session,
+        UserCreate(
+            email="reset-cashier@example.com",
+            password="cashierpassword",
+            first_name="Reset",
+            last_name="Cashier",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    first_reset_response = api_client.post(
+        f"/api/v1/auth/users/{user.id}/password-reset",
+        headers=owner_headers,
+    )
+    assert first_reset_response.status_code == 200, first_reset_response.text
+    first_token = first_reset_response.json()["token"]
+
+    second_reset_response = api_client.post(
+        f"/api/v1/auth/users/{user.id}/password-reset",
+        headers=owner_headers,
+    )
+    assert second_reset_response.status_code == 200, second_reset_response.text
+    second_token = second_reset_response.json()["token"]
+    assert second_token != first_token
+
+    first_preview_response = api_client.get(f"/api/v1/auth/password-setup/{first_token}")
+    assert first_preview_response.status_code == 404
+
+    second_confirm_response = api_client.post(
+        "/api/v1/auth/password-setup/confirm",
+        json={"token": second_token, "password": "resetcashierpassword"},
+    )
+    assert second_confirm_response.status_code == 200, second_confirm_response.text
+
+    login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "reset-cashier@example.com", "password": "resetcashierpassword"},
+    )
+    assert login_response.status_code == 200, login_response.text
+
+
 def test_owner_cannot_manage_staff_for_another_restaurant(
     api_client: TestClient,
     db_session: Session,

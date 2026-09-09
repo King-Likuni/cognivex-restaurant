@@ -1,13 +1,20 @@
 """Auth service: business logic for user management and authentication."""
 
+import hashlib
+import secrets
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.auth.models import Role, User
-from app.auth.schemas import UserCreate, UserUpdate
+from app.auth.models import PasswordResetToken, Role, User
+from app.auth.schemas import StaffInviteCreate, UserCreate, UserUpdate
 from app.core.security import get_password_hash, verify_password
 from app.tenants.models import Branch, Restaurant
+
+PASSWORD_SETUP_TOKEN_HOURS = 48
+TOKEN_PURPOSE_INVITE = "INVITE"
+TOKEN_PURPOSE_RESET = "RESET"
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
@@ -18,6 +25,20 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     if not verify_password(password, user.password_hash):
         return None
     return user
+
+
+def hash_setup_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def create_user(db: Session, user_in: UserCreate) -> User:
@@ -57,6 +78,60 @@ def create_user(db: Session, user_in: UserCreate) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def create_user_invite(
+    db: Session,
+    user_in: StaffInviteCreate,
+    created_by: UUID | None,
+) -> tuple[User, PasswordResetToken, str]:
+    temporary_password = secrets.token_urlsafe(24)
+    user = create_user(
+        db,
+        UserCreate(
+            email=user_in.email,
+            password=temporary_password,
+            first_name=user_in.first_name,
+            last_name=user_in.last_name,
+            role_name=user_in.role_name,
+            restaurant_id=user_in.restaurant_id,
+            branch_ids=user_in.branch_ids,
+        ),
+    )
+    reset_token, raw_token = create_password_setup_token(
+        db,
+        user,
+        created_by=created_by,
+        purpose=TOKEN_PURPOSE_INVITE,
+    )
+    return user, reset_token, raw_token
+
+
+def create_password_setup_token(
+    db: Session,
+    user: User,
+    *,
+    created_by: UUID | None,
+    purpose: str = TOKEN_PURPOSE_RESET,
+) -> tuple[PasswordResetToken, str]:
+    now = utc_now()
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({"used_at": now})
+
+    raw_token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=hash_setup_token(raw_token),
+        purpose=purpose,
+        expires_at=now + timedelta(hours=PASSWORD_SETUP_TOKEN_HOURS),
+        created_by=created_by,
+    )
+    db.add(reset_token)
+    db.commit()
+    db.refresh(reset_token)
+    return reset_token, raw_token
 
 
 def validate_role(db: Session, role_name: str) -> Role:
@@ -154,6 +229,32 @@ def update_user(db: Session, user: User, user_in: UserUpdate) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def get_valid_password_setup_token(db: Session, raw_token: str) -> PasswordResetToken | None:
+    reset_token = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token_hash == hash_setup_token(raw_token))
+        .first()
+    )
+    if not reset_token or reset_token.used_at is not None:
+        return None
+    if as_aware_utc(reset_token.expires_at) <= utc_now():
+        return None
+    if not reset_token.user or not reset_token.user.is_active:
+        return None
+    return reset_token
+
+
+def set_password_with_token(db: Session, raw_token: str, password: str) -> User | None:
+    reset_token = get_valid_password_setup_token(db, raw_token)
+    if reset_token is None:
+        return None
+    reset_token.user.password_hash = get_password_hash(password)
+    reset_token.used_at = utc_now()
+    db.commit()
+    db.refresh(reset_token.user)
+    return reset_token.user
 
 
 def seed_roles(db: Session) -> None:

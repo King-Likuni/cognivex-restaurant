@@ -14,6 +14,25 @@ export type User = {
   branch_ids: string[];
 };
 
+export type PasswordSetupToken = {
+  token: string;
+  setup_url_path: string;
+  expires_at: string;
+};
+
+export type StaffInviteResponse = {
+  user: User;
+  invite: PasswordSetupToken;
+};
+
+export type PasswordSetupPreview = {
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  role_name: RoleName | null;
+  expires_at: string;
+};
+
 export type Restaurant = {
   id: string;
   code: string;

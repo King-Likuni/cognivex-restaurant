@@ -1,9 +1,16 @@
-import { Plus, Power, PowerOff, RefreshCw, Save, Users } from "lucide-react";
+import { Copy, KeyRound, Plus, Power, PowerOff, RefreshCw, Save, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AppContext } from "../App";
 import { EmptyState, Field, Notice, Panel } from "../components/ui";
-import { apiRequest, type Branch, type RoleName, type User } from "../services/api";
+import {
+  apiRequest,
+  type Branch,
+  type PasswordSetupToken,
+  type RoleName,
+  type StaffInviteResponse,
+  type User,
+} from "../services/api";
 
 type Props = {
   context: AppContext;
@@ -20,7 +27,6 @@ type StaffDraft = {
 
 type NewStaffForm = StaffDraft & {
   email: string;
-  password: string;
 };
 
 type StaffRole = Exclude<RoleName, "ADMIN">;
@@ -29,7 +35,6 @@ const STAFF_ROLES: StaffRole[] = ["OWNER", "MANAGER", "CASHIER", "KITCHEN"];
 
 const DEFAULT_NEW_STAFF: NewStaffForm = {
   email: "",
-  password: "",
   first_name: "",
   last_name: "",
   role_name: "CASHIER",
@@ -56,6 +61,10 @@ function toggleBranchId(branchIds: string[], branchId: string) {
   return [...branchIds, branchId];
 }
 
+function setupUrlFromToken(invite: PasswordSetupToken) {
+  return `${window.location.origin}${invite.setup_url_path}`;
+}
+
 export function StaffManagementView({ context, token, branches }: Props) {
   const [users, setUsers] = useState<User[]>([]);
   const [drafts, setDrafts] = useState<Record<string, StaffDraft>>({});
@@ -64,6 +73,7 @@ export function StaffManagementView({ context, token, branches }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [latestSetupUrl, setLatestSetupUrl] = useState<string | null>(null);
 
   const activeStaffCount = useMemo(
     () => users.filter((user) => user.is_active).length,
@@ -124,11 +134,12 @@ export function StaffManagementView({ context, token, branches }: Props) {
     event.preventDefault();
     setNotice(null);
     setError(null);
+    setLatestSetupUrl(null);
     if (!validateStaffPayload(newStaff.role_name, newStaff.branch_ids)) {
       return;
     }
     try {
-      await apiRequest<User>("/api/v1/auth/users", {
+      const invite = await apiRequest<StaffInviteResponse>("/api/v1/auth/users/invite", {
         method: "POST",
         token,
         body: {
@@ -139,8 +150,9 @@ export function StaffManagementView({ context, token, branches }: Props) {
           restaurant_id: context.restaurant.id,
         },
       });
+      setLatestSetupUrl(setupUrlFromToken(invite.invite));
       setNewStaff(DEFAULT_NEW_STAFF);
-      setNotice("Staff member created");
+      setNotice("Staff member created. Share the password setup link with them.");
       await loadUsers();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not create staff member");
@@ -183,12 +195,57 @@ export function StaffManagementView({ context, token, branches }: Props) {
     void patchStaff(user, { is_active: !user.is_active });
   }
 
+  async function createPasswordReset(user: User) {
+    setSavingUserId(user.id);
+    setNotice(null);
+    setError(null);
+    setLatestSetupUrl(null);
+    try {
+      const invite = await apiRequest<PasswordSetupToken>(
+        `/api/v1/auth/users/${user.id}/password-reset`,
+        {
+          method: "POST",
+          token,
+        },
+      );
+      setLatestSetupUrl(setupUrlFromToken(invite));
+      setNotice("Password setup link created");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create password setup link");
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
+  async function copySetupUrl() {
+    if (!latestSetupUrl) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(latestSetupUrl);
+      setNotice("Password setup link copied");
+    } catch {
+      setError("Could not copy link. Select the link and copy it manually.");
+    }
+  }
+
   return (
     <div className="view-grid two-columns">
       <div className="view-stack">
         {error ? <Notice tone="error">{error}</Notice> : null}
         {notice ? <Notice tone="success">{notice}</Notice> : null}
         {isLoading ? <Notice>Loading staff</Notice> : null}
+        {latestSetupUrl ? (
+          <Panel title="Password Setup Link">
+            <div className="invite-link-box">
+              <input readOnly value={latestSetupUrl} />
+              <button className="secondary-action" type="button" onClick={copySetupUrl}>
+                <Copy size={17} />
+                Copy
+              </button>
+            </div>
+          </Panel>
+        ) : null}
 
         <Panel title="Add Staff">
           <form className="staff-form" onSubmit={createStaff}>
@@ -211,15 +268,6 @@ export function StaffManagementView({ context, token, branches }: Props) {
                 type="email"
                 value={newStaff.email}
                 onChange={(event) => updateNewStaff("email", event.target.value)}
-                required
-              />
-            </Field>
-            <Field label="Temporary password">
-              <input
-                type="password"
-                value={newStaff.password}
-                onChange={(event) => updateNewStaff("password", event.target.value)}
-                minLength={8}
                 required
               />
             </Field>
@@ -351,6 +399,15 @@ export function StaffManagementView({ context, token, branches }: Props) {
                     >
                       <Save size={17} />
                       Save
+                    </button>
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => createPasswordReset(user)}
+                      disabled={isSaving || !user.is_active}
+                    >
+                      <KeyRound size={17} />
+                      Setup link
                     </button>
                     <button
                       className={user.is_active ? "secondary-action danger-action" : "secondary-action"}

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { PasswordSetupView } from "./auth/PasswordSetupView";
 import { CashierView } from "./cashier/CashierView";
 import { Field, Notice } from "./components/ui";
 import { CustomerOrderView } from "./customer/CustomerOrderView";
@@ -352,6 +353,9 @@ function App() {
   }
   if (window.location.pathname.startsWith("/customer/")) {
     return <CustomerStatusView />;
+  }
+  if (normalizedPath === "/password-setup") {
+    return <PasswordSetupView />;
   }
   return <OperationsApp />;
 }
