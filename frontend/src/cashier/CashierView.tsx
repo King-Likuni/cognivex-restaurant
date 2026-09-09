@@ -44,6 +44,7 @@ type CustomerStatusLink = {
 type MobileTransferConfirmation = {
   orderId: string;
   amountReceived: string;
+  paymentReferenceUsed: string;
   transactionId: string;
 };
 
@@ -297,6 +298,7 @@ export function CashierView({ context, token }: Props) {
     setMobileTransferConfirmation({
       orderId: order.id,
       amountReceived: order.total,
+      paymentReferenceUsed: "",
       transactionId: "",
     });
     setError(null);
@@ -318,6 +320,7 @@ export function CashierView({ context, token }: Props) {
           token,
           body: {
             amount_received: mobileTransferConfirmation.amountReceived,
+            payment_reference_used: mobileTransferConfirmation.paymentReferenceUsed,
             provider_transaction_id: mobileTransferConfirmation.transactionId.trim() || null,
           },
         },
@@ -497,6 +500,18 @@ export function CashierView({ context, token }: Props) {
                           amountReceived: event.target.value,
                         })
                       }
+                    />
+                  </Field>
+                  <Field label="Payment reference used">
+                    <input
+                      value={mobileTransferConfirmation.paymentReferenceUsed}
+                      onChange={(event) =>
+                        setMobileTransferConfirmation({
+                          ...mobileTransferConfirmation,
+                          paymentReferenceUsed: event.target.value,
+                        })
+                      }
+                      placeholder={order.payment_reference}
                     />
                   </Field>
                   <Field label="Transfer reference">

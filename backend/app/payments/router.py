@@ -93,6 +93,7 @@ def confirm_mobile_transfer_payment(
             restaurant_id=restaurant_id,
             order_id=order_id,
             amount_received=data.amount_received,
+            payment_reference_used=data.payment_reference_used,
             provider_transaction_id=data.provider_transaction_id,
             confirmed_by=current_user,
         )

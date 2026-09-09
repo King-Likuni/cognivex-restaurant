@@ -315,6 +315,7 @@ def confirm_mobile_transfer_payment(
     order_id: UUID,
     amount_received: Decimal,
     confirmed_by: User,
+    payment_reference_used: str,
     provider_transaction_id: str | None = None,
 ) -> Payment:
     order = get_order_for_payment(db, restaurant_id, order_id)
@@ -332,6 +333,10 @@ def confirm_mobile_transfer_payment(
         raise ValueError("Mobile transfer can only be confirmed for pending-payment orders")
     if amount_received < Decimal(order.total):
         raise ValueError("Amount received is less than order total")
+
+    normalized_payment_reference = payment_reference_used.strip().upper()
+    if normalized_payment_reference != order.payment_reference.upper():
+        raise ValueError("Payment reference does not match this order")
 
     normalized_transaction_id = provider_transaction_id.strip() if provider_transaction_id else None
     if normalized_transaction_id:
@@ -363,6 +368,7 @@ def confirm_mobile_transfer_payment(
                 "amount_received": str(amount_received),
                 "order_total": str(order.total),
                 "confirmed_by": str(confirmed_by.id),
+                "payment_reference_used": normalized_payment_reference,
                 "provider_transaction_id": normalized_transaction_id,
             },
         )
@@ -384,6 +390,7 @@ def confirm_mobile_transfer_payment(
                 "order_status": OrderStatus.QUEUED.value,
                 "amount_received": str(amount_received),
                 "amount_paid": str(order.total),
+                "payment_reference_used": normalized_payment_reference,
                 "provider_transaction_id": normalized_transaction_id,
             },
         )

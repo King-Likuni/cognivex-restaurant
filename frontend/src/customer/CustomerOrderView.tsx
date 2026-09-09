@@ -144,7 +144,8 @@ export function CustomerOrderView() {
         {orderResult ? (
           <Notice tone="success">
             {orderResult.order.display_number} created. Payment reference:{" "}
-            {orderResult.payment.reference}
+            <strong>{orderResult.payment.reference}</strong>. Use this exact reference when you send
+            payment.
           </Notice>
         ) : null}
         <form className="customer-order-grid" onSubmit={submitOrder}>

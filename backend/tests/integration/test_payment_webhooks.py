@@ -187,6 +187,7 @@ def test_mobile_transfer_payment_can_be_manually_confirmed(
         headers=headers,
         json={
             "amount_received": "55.00",
+            "payment_reference_used": order["payment_reference"],
             "provider_transaction_id": "manual-om-txn-001",
         },
     )
@@ -210,6 +211,36 @@ def test_mobile_transfer_payment_can_be_manually_confirmed(
         "PAYMENT_INITIATED",
         "ORANGE_MONEY_MANUAL_CONFIRMED",
     ]
+
+
+def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    headers = login(api_client, "owner@example.com", "ownerpassword")
+    item = create_menu_item(api_client, restaurant_id, headers)
+    order = create_order(api_client, restaurant_id, branch_id, headers, item["id"])
+
+    initiate_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments",
+        headers=headers,
+        json={"provider": "ORANGE_MONEY", "customer_phone_number": "+26770000000"},
+    )
+    assert initiate_response.status_code == 201, initiate_response.text
+
+    confirm_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
+        headers=headers,
+        json={
+            "amount_received": "55.00",
+            "payment_reference_used": "WRONG-REFERENCE",
+            "provider_transaction_id": "manual-wrong-ref-001",
+        },
+    )
+    assert confirm_response.status_code == 400
+    assert confirm_response.json()["detail"] == "Payment reference does not match this order"
 
 
 def test_payment_webhook_rejects_invalid_signature(
