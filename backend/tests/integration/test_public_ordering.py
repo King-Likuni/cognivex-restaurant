@@ -92,6 +92,13 @@ def test_public_menu_and_qr_order_flow(api_client, db_session, seeded_restaurant
         for order in customer_orders_response.json()
         if order["channel"] in {"QR", "WHATSAPP"}
     }
+    all_orders_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}/orders/",
+        headers=owner_headers,
+        params={"business_date": date.today().isoformat()},
+    )
+    assert all_orders_response.status_code == 200, all_orders_response.text
+    assert payload["order"]["id"] in {order["id"] for order in all_orders_response.json()}
 
     status_response = api_client.get(
         (

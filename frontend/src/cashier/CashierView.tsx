@@ -41,8 +41,13 @@ type CustomerStatusLink = {
   expiresInSeconds: number;
 };
 
-const ACTIVE_CUSTOMER_ORDER_STATUSES = ["PENDING_PAYMENT", "QUEUED", "PREPARING"] as const;
 const CUSTOMER_CHANNELS = new Set(["QR", "WHATSAPP"]);
+const CLOSED_ORDER_STATUSES = new Set([
+  "COLLECTED",
+  "UNCOLLECTED",
+  "CANCELLED",
+  "PAYMENT_EXPIRED",
+]);
 
 function currentBusinessDate() {
   return new Date().toISOString().slice(0, 10);
@@ -95,30 +100,18 @@ export function CashierView({ context, token }: Props) {
     setError(null);
     try {
       const orderPath = `/api/v1/restaurants/${context.restaurant.id}/branches/${context.branch.id}/orders/`;
-      const orderParams = { business_date: currentBusinessDate() };
-      const [pendingPayment, queued, preparing, ready, uncollected] = await Promise.all([
-        ...ACTIVE_CUSTOMER_ORDER_STATUSES.map((status) =>
-          apiRequest<Order[]>(orderPath, {
-            token,
-            params: { ...orderParams, status },
-          }),
-        ),
-        apiRequest<Order[]>(orderPath, {
-          token,
-          params: { ...orderParams, status: "READY" },
-        }),
-        apiRequest<Order[]>(orderPath, {
-          token,
-          params: { ...orderParams, status: "UNCOLLECTED" },
-        }),
-      ]);
+      const orders = await apiRequest<Order[]>(orderPath, {
+        token,
+        params: { business_date: currentBusinessDate() },
+      });
       setCustomerOrders(
-        [...pendingPayment, ...queued, ...preparing].filter((order) =>
-          CUSTOMER_CHANNELS.has(order.channel),
+        orders.filter(
+          (order) =>
+            CUSTOMER_CHANNELS.has(order.channel) && !CLOSED_ORDER_STATUSES.has(order.order_status),
         ),
       );
-      setReadyOrders(ready);
-      setUncollectedOrders(uncollected);
+      setReadyOrders(orders.filter((order) => order.order_status === "READY"));
+      setUncollectedOrders(orders.filter((order) => order.order_status === "UNCOLLECTED"));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load order desk");
     }
