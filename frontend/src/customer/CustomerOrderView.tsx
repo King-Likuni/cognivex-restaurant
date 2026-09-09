@@ -17,7 +17,7 @@ type CartLine = {
 
 function readOrderRoute() {
   const match = window.location.pathname.match(
-    /^\/order\/restaurants\/([^/]+)\/branches\/([^/]+)$/,
+    /^\/order\/restaurants\/([^/]+)\/branches\/([^/]+)\/?$/,
   );
   const channel = new URLSearchParams(window.location.search).get("channel");
   return {

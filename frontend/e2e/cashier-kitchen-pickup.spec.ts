@@ -189,7 +189,7 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   const { api, data } = await apiSetup();
 
   await page.addInitScript(() => window.localStorage.clear());
-  await page.goto(`/order/restaurants/${data.restaurantId}/branches/${data.branchId}`);
+  await page.goto(`/order/restaurants/${data.restaurantId}/branches/${data.branchId}/`);
 
   await expect(page.getByRole("heading", { name: /Chicken Spot/i })).toBeVisible();
   await page.getByTestId(`customer-add-${data.menuItem.id}`).click();

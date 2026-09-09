@@ -11,7 +11,7 @@ import {
 
 function readCustomerRoute() {
   const match = window.location.pathname.match(
-    /^\/customer\/restaurants\/([^/]+)\/branches\/([^/]+)\/orders\/([^/]+)\/status$/,
+    /^\/customer\/restaurants\/([^/]+)\/branches\/([^/]+)\/orders\/([^/]+)\/status\/?$/,
   );
   const token = new URLSearchParams(window.location.search).get("token");
   return {
