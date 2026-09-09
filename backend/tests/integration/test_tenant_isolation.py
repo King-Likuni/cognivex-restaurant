@@ -247,6 +247,103 @@ def test_cashier_branch_list_only_includes_assigned_branches(
     assert str(other_branch.id) not in branch_ids
 
 
+def test_owner_can_deactivate_placeholder_branch(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    create_branch(
+        db_session,
+        restaurant.id,
+        BranchCreate(name="string", code="BAD", location="placeholder"),
+    )
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    all_branches_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/branches",
+        headers=owner_headers,
+        params={"include_inactive": "true"},
+    )
+    assert all_branches_response.status_code == 200, all_branches_response.text
+    placeholder_branch = next(
+        branch for branch in all_branches_response.json() if branch["name"] == "string"
+    )
+
+    update_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{placeholder_branch['id']}",
+        headers=owner_headers,
+        json={"name": "Legacy Placeholder", "code": "LEGACY", "is_active": False},
+    )
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["name"] == "Legacy Placeholder"
+    assert update_response.json()["code"] == "LEGACY"
+    assert update_response.json()["is_active"] is False
+
+    active_branches_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/branches",
+        headers=owner_headers,
+    )
+    assert active_branches_response.status_code == 200
+    active_branch_ids = {branch["id"] for branch in active_branches_response.json()}
+    assert placeholder_branch["id"] not in active_branch_ids
+
+
+def test_only_owner_or_admin_can_manage_inactive_branches(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    manager = create_user(
+        db_session,
+        UserCreate(
+            email="branch-manager@example.com",
+            password="managerpassword",
+            first_name="Branch",
+            last_name="Manager",
+            role_name="MANAGER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    assert manager.id
+    manager_headers = login(api_client, "branch-manager@example.com", "managerpassword")
+
+    inactive_list_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/branches",
+        headers=manager_headers,
+        params={"include_inactive": "true"},
+    )
+    assert inactive_list_response.status_code == 403
+
+    update_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}",
+        headers=manager_headers,
+        json={"location": "Updated by manager"},
+    )
+    assert update_response.status_code == 403
+
+
+def test_cannot_deactivate_last_active_branch(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}",
+        headers=owner_headers,
+        json={"is_active": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "At least one active branch is required"
+
+
 def test_cross_tenant_payment_kitchen_and_report_access_are_blocked(
     api_client: TestClient,
     db_session: Session,
@@ -320,6 +417,14 @@ def test_admin_can_cross_restaurant_boundary_for_platform_operations(
     )
     assert get_response.status_code == 200
     assert get_response.json()["name"] == "Burger Barn Test"
+
+    branch_response = api_client.patch(
+        f"/api/v1/restaurants/{other_restaurant_id}/branches/{other['branch'].id}",
+        headers=admin_headers,
+        json={"location": "Admin Updated"},
+    )
+    assert branch_response.status_code == 200, branch_response.text
+    assert branch_response.json()["location"] == "Admin Updated"
 
 
 def test_admin_can_create_first_restaurant_owner(

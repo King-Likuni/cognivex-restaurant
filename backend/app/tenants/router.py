@@ -2,12 +2,14 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.auth.models import User
 from app.core.database import get_db
 from app.core.dependencies import (
+    ensure_restaurant_access,
+    get_current_active_user,
     require_admin,
     require_restaurant_access,
     require_restaurant_owner,
@@ -16,6 +18,7 @@ from app.tenants import service
 from app.tenants.schemas import (
     BranchCreate,
     BranchResponse,
+    BranchUpdate,
     RestaurantCreate,
     RestaurantResponse,
     RestaurantSettingsResponse,
@@ -23,6 +26,19 @@ from app.tenants.schemas import (
 )
 
 router = APIRouter(prefix="/restaurants", tags=["Restaurants"])
+
+
+def require_branch_admin(restaurant_id: UUID, current_user: User) -> None:
+    role_name = current_user.role.name if current_user.role else None
+    if role_name == "ADMIN":
+        return
+    if role_name == "OWNER":
+        ensure_restaurant_access(current_user, restaurant_id)
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only restaurant owners or platform admins can manage branches",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -68,14 +84,15 @@ def get_restaurant(restaurant_id: UUID, db: Session = Depends(get_db)):
     "/{restaurant_id}/branches",
     response_model=BranchResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_restaurant_owner)],
 )
 def create_branch(
     restaurant_id: UUID,
     data: BranchCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    """Create a new branch under a restaurant. Owners only."""
+    """Create a new branch under a restaurant. Owners and platform admins only."""
+    require_branch_admin(restaurant_id, current_user)
     restaurant = service.get_restaurant(db, restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant not found")
@@ -88,11 +105,45 @@ def create_branch(
 )
 def list_branches(
     restaurant_id: UUID,
+    include_inactive: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_restaurant_access),
 ):
     """List branches the current user can operate for the restaurant."""
-    return service.list_accessible_branches(db, restaurant_id, current_user)
+    role_name = current_user.role.name if current_user.role else None
+    if include_inactive and role_name not in {"ADMIN", "OWNER"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only restaurant owners or platform admins can list inactive branches",
+        )
+    return service.list_accessible_branches(
+        db,
+        restaurant_id,
+        current_user,
+        include_inactive=include_inactive,
+    )
+
+
+@router.patch(
+    "/{restaurant_id}/branches/{branch_id}",
+    response_model=BranchResponse,
+)
+def update_branch(
+    restaurant_id: UUID,
+    branch_id: UUID,
+    data: BranchUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update branch details or active status. Owners and platform admins only."""
+    require_branch_admin(restaurant_id, current_user)
+    try:
+        branch = service.update_branch(db, restaurant_id, branch_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return branch
 
 
 # --------------------------------------------------------------------------- #

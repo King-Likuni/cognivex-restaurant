@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.auth.models import User
 from app.tenants.models import Branch, Restaurant, RestaurantSettings
-from app.tenants.schemas import BranchCreate, RestaurantCreate, RestaurantSettingsUpdate
+from app.tenants.schemas import (
+    BranchCreate,
+    BranchUpdate,
+    RestaurantCreate,
+    RestaurantSettingsUpdate,
+)
 
 
 def normalize_code(value: str) -> str:
@@ -88,18 +93,43 @@ def create_branch(db: Session, restaurant_id: UUID, data: BranchCreate) -> Branc
     return branch
 
 
-def list_branches(db: Session, restaurant_id: UUID) -> list[Branch]:
+def get_branch(db: Session, restaurant_id: UUID, branch_id: UUID) -> Branch | None:
     return (
         db.query(Branch)
-        .filter(Branch.restaurant_id == restaurant_id, Branch.is_active.is_(True))
-        .all()
+        .filter(Branch.restaurant_id == restaurant_id, Branch.id == branch_id)
+        .first()
     )
 
 
-def list_accessible_branches(db: Session, restaurant_id: UUID, user: User) -> list[Branch]:
+def list_branches(db: Session, restaurant_id: UUID, include_inactive: bool = False) -> list[Branch]:
+    query = db.query(Branch).filter(Branch.restaurant_id == restaurant_id)
+    if not include_inactive:
+        query = query.filter(Branch.is_active.is_(True))
+    return query.order_by(Branch.name.asc()).all()
+
+
+def count_active_branches(
+    db: Session, restaurant_id: UUID, exclude_branch_id: UUID | None = None
+) -> int:
+    query = db.query(Branch).filter(
+        Branch.restaurant_id == restaurant_id,
+        Branch.is_active.is_(True),
+    )
+    if exclude_branch_id:
+        query = query.filter(Branch.id != exclude_branch_id)
+    return query.count()
+
+
+def list_accessible_branches(
+    db: Session,
+    restaurant_id: UUID,
+    user: User,
+    *,
+    include_inactive: bool = False,
+) -> list[Branch]:
     role_name = user.role.name if user.role else None
     if role_name in {"ADMIN", "OWNER", "MANAGER"}:
-        return list_branches(db, restaurant_id)
+        return list_branches(db, restaurant_id, include_inactive=include_inactive)
 
     assigned_branch_ids = [branch.id for branch in user.branches]
     if not assigned_branch_ids:
@@ -112,8 +142,56 @@ def list_accessible_branches(db: Session, restaurant_id: UUID, user: User) -> li
             Branch.id.in_(assigned_branch_ids),
             Branch.is_active.is_(True),
         )
+        .order_by(Branch.name.asc())
         .all()
     )
+
+
+def update_branch(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    data: BranchUpdate,
+) -> Branch | None:
+    branch = get_branch(db, restaurant_id, branch_id)
+    if not branch:
+        return None
+
+    changes = data.model_dump(exclude_unset=True)
+
+    if "code" in changes and data.code is not None:
+        candidate_code = normalize_code(data.code)
+        existing_branch = (
+            db.query(Branch)
+            .filter(
+                Branch.restaurant_id == restaurant_id,
+                Branch.code == candidate_code,
+                Branch.id != branch_id,
+            )
+            .first()
+        )
+        if existing_branch:
+            raise ValueError("Branch code already exists")
+        branch.code = candidate_code
+
+    if "name" in changes and data.name is not None:
+        branch.name = data.name
+
+    if "location" in changes:
+        branch.location = data.location
+
+    if "is_active" in changes and data.is_active is not None:
+        if branch.is_active and data.is_active is False:
+            remaining_active_branches = count_active_branches(
+                db, restaurant_id, exclude_branch_id=branch_id
+            )
+            if remaining_active_branches == 0:
+                raise ValueError("At least one active branch is required")
+        branch.is_active = data.is_active
+
+    db.commit()
+    db.refresh(branch)
+    return branch
 
 
 def get_restaurant_settings(db: Session, restaurant_id: UUID) -> RestaurantSettings | None:

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Boxes,
+  Building2,
   ChefHat,
   CreditCard,
   LogOut,
@@ -13,6 +14,7 @@ import { CashierView } from "./cashier/CashierView";
 import { Field, Notice } from "./components/ui";
 import { CustomerOrderView } from "./customer/CustomerOrderView";
 import { CustomerStatusView } from "./customer/CustomerStatusView";
+import { BranchManagementView } from "./manager/BranchManagementView";
 import { InventoryView } from "./manager/InventoryView";
 import { DashboardView } from "./manager/DashboardView";
 import { KitchenView } from "./kitchen/KitchenView";
@@ -35,7 +37,7 @@ export type AppContext = {
   branch: Branch;
 };
 
-type ViewKey = "cashier" | "kitchen" | "inventory" | "dashboard";
+type ViewKey = "cashier" | "kitchen" | "inventory" | "dashboard" | "branches";
 
 const STORAGE_KEY = "cognivex.session";
 const BRANCH_STORAGE_KEY = "cognivex.branchId";
@@ -45,10 +47,12 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
   { key: "kitchen", label: "Kitchen", icon: ChefHat },
   { key: "inventory", label: "Inventory", icon: Boxes },
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
+  { key: "branches", label: "Branches", icon: Building2 },
 ];
 
 const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
-  OWNER: ["cashier", "kitchen", "inventory", "dashboard"],
+  ADMIN: ["branches"],
+  OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier"],
   KITCHEN: ["kitchen"],
@@ -320,6 +324,13 @@ function OperationsApp() {
             ) : null}
             {view === "dashboard" && visibleNavItems.some((item) => item.key === "dashboard") ? (
               <DashboardView context={context} token={token} />
+            ) : null}
+            {view === "branches" && visibleNavItems.some((item) => item.key === "branches") ? (
+              <BranchManagementView
+                context={context}
+                token={token}
+                onBranchesChanged={() => setRefreshKey((current) => current + 1)}
+              />
             ) : null}
           </>
         ) : null}

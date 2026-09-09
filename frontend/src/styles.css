@@ -318,6 +318,7 @@ button:disabled {
 .order-stack,
 .data-list,
 .event-list,
+.branch-admin-list,
 .customer-menu-stack,
 .customer-menu-list {
   display: grid;
@@ -412,6 +413,39 @@ button:disabled {
   color: #667286;
   font-size: 12px;
   font-weight: 800;
+}
+
+.branch-admin-row {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 14px;
+}
+
+.branch-admin-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.branch-admin-heading div {
+  display: grid;
+  min-width: 0;
+}
+
+.branch-admin-heading span:not(.status-pill) {
+  color: #667286;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.branch-admin-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.7fr) minmax(180px, 1fr);
+  gap: 12px;
 }
 
 .customer-link-row {
@@ -614,6 +648,11 @@ button:disabled {
   color: #915d13;
 }
 
+.status-pill.inactive {
+  background: #f4ecec;
+  color: #8d3434;
+}
+
 .notice,
 .empty-state {
   border-radius: 8px;
@@ -691,7 +730,7 @@ button:disabled {
   }
 
   .nav-stack {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   }
 
   .nav-item {
@@ -719,10 +758,12 @@ button:disabled {
   .topbar-actions,
   .toolbar-line,
   .order-card-header,
+  .branch-admin-heading,
   .order-meta,
   .customer-link-row,
   .button-row,
-  .compact-form {
+  .compact-form,
+  .branch-admin-grid {
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;

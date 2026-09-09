@@ -29,6 +29,13 @@ export type Branch = {
   is_active: boolean;
 };
 
+export type BranchUpdate = {
+  code?: string;
+  name?: string;
+  location?: string | null;
+  is_active?: boolean;
+};
+
 export type MenuCategory = {
   id: string;
   restaurant_id: string;

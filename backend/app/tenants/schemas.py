@@ -32,6 +32,13 @@ class BranchCreate(BaseModel):
     location: str | None = None
 
 
+class BranchUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    code: str | None = Field(default=None, min_length=1, max_length=12)
+    location: str | None = None
+    is_active: bool | None = None
+
+
 class BranchResponse(BaseModel):
     id: UUID
     restaurant_id: UUID
