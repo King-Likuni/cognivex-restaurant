@@ -170,6 +170,7 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await expect(pickupOrder).toBeVisible();
   await pickupOrder.getByRole("button", { name: "Collected", exact: true }).click();
   await expect(pickupOrder).toBeHidden();
+  await expect(page.getByTestId(`collected-order-${order!.id}`)).toBeVisible();
 
   const finalReport = await getDailySalesReport(api, headers, data);
   const expectedCollectedOrders = baselineReport.collected_orders + 1;

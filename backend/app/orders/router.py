@@ -158,3 +158,21 @@ def mark_uncollected(
         return service.mark_uncollected(db, restaurant_id, branch_id, order_id, current_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{order_id}/cancel", response_model=OrderResponse)
+def cancel_order(
+    restaurant_id: UUID,
+    branch_id: UUID,
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_cashier),
+    branch_user: User = Depends(require_branch_access),
+):
+    ensure_restaurant_access(current_user, restaurant_id)
+    if branch_user.id != current_user.id:
+        raise HTTPException(status_code=403, detail="Branch access validation failed")
+    try:
+        return service.cancel_order(db, restaurant_id, branch_id, order_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -42,7 +42,7 @@ def list_categories(
     restaurant_id: UUID,
     include_inactive: bool = Query(default=False),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_cashier),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
     return service.list_categories(db, restaurant_id, include_inactive=include_inactive)
@@ -82,7 +82,7 @@ def list_items(
     restaurant_id: UUID,
     include_unavailable: bool = Query(default=False),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_cashier),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
     return service.list_items(db, restaurant_id, include_unavailable=include_unavailable)

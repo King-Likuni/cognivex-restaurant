@@ -4,6 +4,9 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth.schemas import UserCreate
+from app.auth.service import create_user
+
 pytestmark = pytest.mark.integration
 
 
@@ -216,3 +219,132 @@ def test_uncollected_order_is_not_counted_as_revenue(
     assert Decimal(report["revenue"]) == Decimal("0.00")
     assert report["top_items"] == []
     assert report["sales_by_payment"] == []
+
+
+def test_cashier_can_read_menu_and_cancel_unpaid_order(
+    api_client: TestClient,
+    db_session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    create_user(
+        db_session,
+        UserCreate(
+            email="cashier@example.com",
+            password="cashierpassword",
+            first_name="Front",
+            last_name="Desk",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    cashier_headers = login(api_client, "cashier@example.com", "cashierpassword")
+
+    category = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/categories",
+        headers=owner_headers,
+        json={"name": "Cancellable", "display_order": 3},
+    ).json()
+    item = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/items",
+        headers=owner_headers,
+        json={
+            "category_id": category["id"],
+            "name": "Pending Meal",
+            "description": None,
+            "price": "35.00",
+            "image_url": None,
+            "is_available": True,
+        },
+    ).json()
+
+    menu_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/menu/items",
+        headers=cashier_headers,
+    )
+    assert menu_response.status_code == 200, menu_response.text
+    assert item["id"] in {menu_item["id"] for menu_item in menu_response.json()}
+
+    order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=cashier_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert order_response.status_code == 201, order_response.text
+    order = order_response.json()
+
+    cancel_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/cancel",
+        headers=cashier_headers,
+    )
+    assert cancel_response.status_code == 200, cancel_response.text
+    assert cancel_response.json()["order_status"] == "CANCELLED"
+
+    report_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
+        headers=owner_headers,
+        params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+    )
+    assert report_response.status_code == 200, report_response.text
+    assert report_response.json()["cancelled_orders"] == 1
+
+
+def test_paid_order_cannot_be_cancelled_without_refund_workflow(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    category = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/categories",
+        headers=owner_headers,
+        json={"name": "Paid Cancel", "display_order": 4},
+    ).json()
+    item = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/items",
+        headers=owner_headers,
+        json={
+            "category_id": category["id"],
+            "name": "Paid Meal",
+            "description": None,
+            "price": "45.00",
+            "image_url": None,
+            "is_available": True,
+        },
+    ).json()
+    order = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=owner_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    ).json()
+    api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/cash/confirm",
+        headers=owner_headers,
+        json={"amount_received": "45.00"},
+    )
+
+    cancel_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/cancel",
+        headers=owner_headers,
+    )
+    assert cancel_response.status_code == 400
+    assert cancel_response.json()["detail"] == (
+        "Paid orders require a refund workflow before cancellation"
+    )

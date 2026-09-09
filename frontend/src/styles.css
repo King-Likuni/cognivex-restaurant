@@ -179,6 +179,16 @@ button:disabled {
   background: #f7f9fb;
 }
 
+.danger-action {
+  border-color: #efc7c7;
+  color: #9b2f2f;
+}
+
+.danger-action:hover {
+  border-color: #dc9e9e;
+  background: #fff1f1;
+}
+
 .icon-button {
   width: 40px;
   padding: 0;
@@ -523,7 +533,7 @@ button:disabled {
 
 .pickup-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 

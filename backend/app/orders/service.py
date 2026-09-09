@@ -397,6 +397,38 @@ def collect_order(
     return order
 
 
+def cancel_order(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    order_id: UUID,
+    changed_by: User,
+) -> Order:
+    order = get_order(db, restaurant_id, branch_id, order_id)
+    if order is None:
+        raise ValueError("Order not found")
+    if order.payment_status == PaymentStatus.PAID.value:
+        raise ValueError("Paid orders require a refund workflow before cancellation")
+
+    previous_status = order.order_status
+    transition_order(db, order, OrderStatus.CANCELLED, changed_by, commit=False)
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant_id,
+            user_id=changed_by.id,
+            action="ORDER_CANCELLED",
+            entity_type="order",
+            entity_id=order.id,
+            old_values={"order_status": previous_status},
+            new_values={"order_status": OrderStatus.CANCELLED.value},
+        )
+    )
+    db.commit()
+    db.refresh(order)
+    publish_order_event(order, "ORDER_CANCELLED")
+    return order
+
+
 def mark_uncollected(
     db: Session,
     restaurant_id: UUID,

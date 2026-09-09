@@ -84,6 +84,7 @@ export function CashierView({ context, token }: Props) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [readyOrders, setReadyOrders] = useState<Order[]>([]);
+  const [collectedOrders, setCollectedOrders] = useState<Order[]>([]);
   const [uncollectedOrders, setUncollectedOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
@@ -135,6 +136,7 @@ export function CashierView({ context, token }: Props) {
         ),
       );
       setReadyOrders(orders.filter((order) => order.order_status === "READY"));
+      setCollectedOrders(orders.filter((order) => order.order_status === "COLLECTED"));
       setUncollectedOrders(orders.filter((order) => order.order_status === "UNCOLLECTED"));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load order desk");
@@ -309,6 +311,30 @@ export function CashierView({ context, token }: Props) {
     }
   }
 
+  async function cancelOrder(order: Order) {
+    setIsBusy(true);
+    setError(null);
+    try {
+      const updatedOrder = await apiRequest<Order>(
+        `/api/v1/restaurants/${context.restaurant.id}/branches/${context.branch.id}/orders/${order.id}/cancel`,
+        { method: "POST", token },
+      );
+      setNotice(`${updatedOrder.display_number} cancelled`);
+      if (lastOrder?.id === updatedOrder.id) {
+        setLastOrder(updatedOrder);
+      }
+      await loadOrderDesk();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not cancel order");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function canCancelOrder(order: Order) {
+    return order.payment_status !== "PAID" && order.order_status !== "CANCELLED";
+  }
+
   function startMobileTransferConfirmation(order: Order) {
     setMobileTransferConfirmation({
       orderId: order.id,
@@ -438,26 +464,37 @@ export function CashierView({ context, token }: Props) {
               <span className="status-pill">{lastOrder.order_status}</span>
               <h3 data-testid="last-order-number">{lastOrder.display_number}</h3>
               <p>{lastOrder.payment_reference}</p>
-              <div className="button-row">
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={confirmCash}
-                  disabled={isBusy || lastOrder.payment_status === "PAID"}
-                >
-                  <Banknote size={17} />
-                  Cash paid
-                </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => initiateRemotePayment("ORANGE_MONEY")}
-                  disabled={isBusy || lastOrder.payment_status === "PAID"}
-                >
-                  <CreditCard size={17} />
-                  Orange Money
-                </button>
-              </div>
+              {canCancelOrder(lastOrder) ? (
+                <div className="button-row">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={confirmCash}
+                    disabled={isBusy}
+                  >
+                    <Banknote size={17} />
+                    Cash paid
+                  </button>
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => initiateRemotePayment("ORANGE_MONEY")}
+                    disabled={isBusy}
+                  >
+                    <CreditCard size={17} />
+                    Orange Money
+                  </button>
+                  <button
+                    className="secondary-action danger-action"
+                    type="button"
+                    onClick={() => void cancelOrder(lastOrder)}
+                    disabled={isBusy}
+                  >
+                    <XCircle size={17} />
+                    Cancel order
+                  </button>
+                </div>
+              ) : null}
               {customerStatusLink?.orderId === lastOrder.id ? (
                 <div className="customer-link-row">
                   <a href={customerStatusLink.url} target="_blank" rel="noreferrer">
@@ -562,15 +599,26 @@ export function CashierView({ context, token }: Props) {
                 <strong>{formatMoney(order.total, order.currency)}</strong>
               </div>
               {order.payment_status !== "PAID" ? (
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => startMobileTransferConfirmation(order)}
-                  disabled={isBusy}
-                >
-                  <Banknote size={17} />
-                  Confirm transfer
-                </button>
+                <div className="button-row">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => startMobileTransferConfirmation(order)}
+                    disabled={isBusy}
+                  >
+                    <Banknote size={17} />
+                    Confirm transfer
+                  </button>
+                  <button
+                    className="secondary-action danger-action"
+                    type="button"
+                    onClick={() => void cancelOrder(order)}
+                    disabled={isBusy}
+                  >
+                    <XCircle size={17} />
+                    Cancel order
+                  </button>
+                </div>
               ) : null}
             </article>
           ))}
@@ -627,6 +675,25 @@ export function CashierView({ context, token }: Props) {
               </article>
             ))}
             {!readyOrders.length ? <EmptyState>No ready orders waiting for pickup</EmptyState> : null}
+          </div>
+          <div className="order-stack">
+            <h3>Collected Today</h3>
+            {collectedOrders.map((order) => (
+              <article
+                className="order-card"
+                data-testid={`collected-order-${order.id}`}
+                key={order.id}
+              >
+                <span className="status-pill">
+                  <CheckCircle2 size={14} />
+                  Collected
+                </span>
+                <h3>{order.display_number}</h3>
+                <p>{order.payment_reference}</p>
+                <strong>{formatMoney(order.total, order.currency)}</strong>
+              </article>
+            ))}
+            {!collectedOrders.length ? <EmptyState>No collected orders today</EmptyState> : null}
           </div>
           <div className="order-stack">
             <h3>Uncollected</h3>
