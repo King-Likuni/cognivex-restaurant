@@ -54,6 +54,18 @@ const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
   KITCHEN: ["kitchen"],
 };
 
+function isPlaceholderBranch(branch: Branch) {
+  return branch.name.trim().toLowerCase() === "string";
+}
+
+function chooseBranch(branches: Branch[], storedBranchId: string | null) {
+  const storedBranch = branches.find((branch) => branch.id === storedBranchId);
+  if (storedBranch && !isPlaceholderBranch(storedBranch)) {
+    return storedBranch;
+  }
+  return branches.find((branch) => !isPlaceholderBranch(branch)) ?? storedBranch ?? branches[0];
+}
+
 function readStoredSession(): Session | null {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) {
@@ -134,6 +146,10 @@ function OperationsApp() {
     const allowedViews = roleName ? ROLE_VIEWS[roleName] ?? [] : [];
     return NAV_ITEMS.filter((item) => allowedViews.includes(item.key));
   }, [session]);
+  const branchOptions = useMemo(() => {
+    const operationalBranches = branches.filter((branch) => !isPlaceholderBranch(branch));
+    return operationalBranches.length ? operationalBranches : branches;
+  }, [branches]);
 
   const loadContext = useCallback(async () => {
     if (!session) {
@@ -168,8 +184,8 @@ function OperationsApp() {
       }
       setBranches(branches);
       const storedBranchId = localStorage.getItem(BRANCH_STORAGE_KEY);
-      const selectedBranch =
-        branches.find((branch) => branch.id === storedBranchId) ?? branches[0];
+      const selectedBranch = chooseBranch(branches, storedBranchId);
+      localStorage.setItem(BRANCH_STORAGE_KEY, selectedBranch.id);
       setContext({ restaurant, branch: selectedBranch });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load workspace");
@@ -207,7 +223,7 @@ function OperationsApp() {
   }
 
   function selectBranch(branchId: string) {
-    const selectedBranch = branches.find((branch) => branch.id === branchId);
+    const selectedBranch = branchOptions.find((branch) => branch.id === branchId);
     if (!selectedBranch || !context) {
       return;
     }
@@ -263,7 +279,7 @@ function OperationsApp() {
                   onChange={(event) => selectBranch(event.target.value)}
                   data-testid="branch-picker"
                 >
-                  {branches.map((branch) => (
+                  {branchOptions.map((branch) => (
                     <option key={branch.id} value={branch.id}>
                       {branch.name}
                     </option>
