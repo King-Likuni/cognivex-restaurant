@@ -130,6 +130,16 @@ def test_cashier_order_to_collected_daily_sale(
     assert collect_response.status_code == 200, collect_response.text
     assert collect_response.json()["order_status"] == "COLLECTED"
 
+    collected_board_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/board",
+        headers=owner_headers,
+    )
+    assert collected_board_response.status_code == 200, collected_board_response.text
+    collected_board = collected_board_response.json()
+    assert order["id"] in {
+        collected_order["id"] for collected_order in collected_board["collected"]
+    }
+
     report_response = api_client.get(
         f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
         headers=owner_headers,

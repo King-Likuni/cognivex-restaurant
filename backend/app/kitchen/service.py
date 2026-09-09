@@ -30,6 +30,12 @@ def get_kitchen_board(db: Session, restaurant_id: UUID, branch_id: UUID) -> dict
             branch_id,
             status=OrderStatus.READY.value,
         ),
+        "collected": list_branch_orders(
+            db,
+            restaurant_id,
+            branch_id,
+            status=OrderStatus.COLLECTED.value,
+        ),
     }
 
 

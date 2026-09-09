@@ -84,7 +84,6 @@ export function CashierView({ context, token }: Props) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [readyOrders, setReadyOrders] = useState<Order[]>([]);
-  const [collectedOrders, setCollectedOrders] = useState<Order[]>([]);
   const [uncollectedOrders, setUncollectedOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
@@ -136,7 +135,6 @@ export function CashierView({ context, token }: Props) {
         ),
       );
       setReadyOrders(orders.filter((order) => order.order_status === "READY"));
-      setCollectedOrders(orders.filter((order) => order.order_status === "COLLECTED"));
       setUncollectedOrders(orders.filter((order) => order.order_status === "UNCOLLECTED"));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load order desk");
@@ -675,25 +673,6 @@ export function CashierView({ context, token }: Props) {
               </article>
             ))}
             {!readyOrders.length ? <EmptyState>No ready orders waiting for pickup</EmptyState> : null}
-          </div>
-          <div className="order-stack">
-            <h3>Collected Today</h3>
-            {collectedOrders.map((order) => (
-              <article
-                className="order-card"
-                data-testid={`collected-order-${order.id}`}
-                key={order.id}
-              >
-                <span className="status-pill">
-                  <CheckCircle2 size={14} />
-                  Collected
-                </span>
-                <h3>{order.display_number}</h3>
-                <p>{order.payment_reference}</p>
-                <strong>{formatMoney(order.total, order.currency)}</strong>
-              </article>
-            ))}
-            {!collectedOrders.length ? <EmptyState>No collected orders today</EmptyState> : null}
           </div>
           <div className="order-stack">
             <h3>Uncollected</h3>

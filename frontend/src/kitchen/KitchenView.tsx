@@ -22,9 +22,10 @@ type BoardColumn = {
   action?: (order: Order) => Promise<void>;
   actionLabel?: string;
   icon?: typeof Play;
+  testIdPrefix?: string;
 };
 
-const EMPTY_BOARD: KitchenBoard = { new: [], preparing: [], ready: [] };
+const EMPTY_BOARD: KitchenBoard = { new: [], preparing: [], ready: [], collected: [] };
 
 export function KitchenView({ context, token }: Props) {
   const [board, setBoard] = useState<KitchenBoard>(EMPTY_BOARD);
@@ -110,6 +111,7 @@ export function KitchenView({ context, token }: Props) {
       icon: CheckCircle2,
     },
     { title: "Ready", orders: board.ready },
+    { title: "Collected Today", orders: board.collected, testIdPrefix: "collected-order" },
   ];
 
   return (
@@ -134,7 +136,7 @@ export function KitchenView({ context, token }: Props) {
                 return (
                   <article
                     className="order-card"
-                    data-testid={`kitchen-order-${order.id}`}
+                    data-testid={`${column.testIdPrefix ?? "kitchen-order"}-${order.id}`}
                     key={order.id}
                   >
                     <span className="status-pill">{order.order_status}</span>

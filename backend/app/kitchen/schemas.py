@@ -9,3 +9,4 @@ class KitchenBoardResponse(BaseModel):
     new: list[OrderResponse]
     preparing: list[OrderResponse]
     ready: list[OrderResponse]
+    collected: list[OrderResponse]

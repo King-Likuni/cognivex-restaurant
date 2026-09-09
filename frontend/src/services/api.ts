@@ -116,6 +116,7 @@ export type KitchenBoard = {
   new: Order[];
   preparing: Order[];
   ready: Order[];
+  collected: Order[];
 };
 
 export type Ingredient = {
