@@ -72,6 +72,14 @@ function orderStatusLabel(order: Order) {
   return order.order_status.replaceAll("_", " ");
 }
 
+function cashierErrorMessage(caught: unknown, fallback: string) {
+  const message = caught instanceof Error ? caught.message : fallback;
+  if (message.toLowerCase() === "not found") {
+    return `${fallback}. Refresh the page, confirm the branch is Main Mall, and try again.`;
+  }
+  return message;
+}
+
 export function CashierView({ context, token }: Props) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
@@ -103,6 +111,14 @@ export function CashierView({ context, token }: Props) {
   useEffect(() => {
     void loadMenu();
   }, [loadMenu]);
+
+  useEffect(() => {
+    setCart([]);
+    setLastOrder(null);
+    setRemotePayment(null);
+    setCustomerStatusLink(null);
+    setMobileTransferConfirmation(null);
+  }, [context.restaurant.id, context.branch.id]);
 
   const loadOrderDesk = useCallback(async () => {
     setError(null);
@@ -202,7 +218,7 @@ export function CashierView({ context, token }: Props) {
       setCart([]);
       setNotice(`Created ${order.display_number}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create order");
+      setError(cashierErrorMessage(caught, "Could not create order"));
     } finally {
       setIsBusy(false);
     }
