@@ -252,6 +252,12 @@ button:disabled {
   gap: 12px;
 }
 
+.order-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+
 .menu-tile {
   display: grid;
   gap: 8px;
@@ -353,6 +359,25 @@ button:disabled {
   border-radius: 8px;
   background: #fbfcfd;
   padding: 14px;
+}
+
+.order-card-header,
+.order-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.order-meta {
+  border-top: 1px solid #e4e9ef;
+  padding-top: 10px;
+}
+
+.order-meta span {
+  color: #667286;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .customer-link-row {
@@ -477,6 +502,7 @@ button:disabled {
 }
 
 .status-pill,
+.channel-pill,
 .socket-state {
   display: inline-flex;
   align-items: center;
@@ -488,6 +514,12 @@ button:disabled {
   padding: 5px 9px;
   font-size: 12px;
   font-weight: 800;
+}
+
+.channel-pill {
+  border-radius: 8px;
+  background: #f5f0e8;
+  color: #6b4f1f;
 }
 
 .socket-state.online,
@@ -604,6 +636,8 @@ button:disabled {
 
   .topbar,
   .toolbar-line,
+  .order-card-header,
+  .order-meta,
   .customer-link-row,
   .button-row,
   .compact-form {

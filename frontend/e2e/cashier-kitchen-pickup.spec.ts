@@ -203,9 +203,23 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   const statusLink = page.getByTestId("customer-status-link");
   await expect(statusLink).toBeVisible();
   await expect(statusLink).toHaveAttribute("href", /\/customer\/restaurants\//);
+  const statusHref = await statusLink.getAttribute("href");
+  const orderId = statusHref?.match(/\/orders\/([^/]+)\/status/)?.[1];
+  if (!orderId) {
+    throw new Error(`Could not find order id in status link: ${statusHref}`);
+  }
 
   await statusLink.click();
   await expect(page.getByText("Payment is being confirmed")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByLabel("Email").fill(OWNER_EMAIL);
+  await page.getByLabel("Password").fill(OWNER_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page.getByTestId(`customer-order-${orderId}`)).toBeVisible();
+  await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("Waiting for payment");
+  await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("QR");
 
   await api.dispose();
 });

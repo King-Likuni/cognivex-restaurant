@@ -1,6 +1,17 @@
+from datetime import date
+
 from app.customers.models import Customer
 from app.menu.schemas import MenuCategoryCreate, MenuItemCreate
 from app.menu.service import create_category, create_item
+
+
+def login(client, email: str, password: str) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def create_public_menu_item(db_session, restaurant_id):
@@ -68,6 +79,19 @@ def test_public_menu_and_qr_order_flow(api_client, db_session, seeded_restaurant
     )
     assert customer.name == "Public Customer"
     assert customer.total_orders == 1
+
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    customer_orders_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}/orders/",
+        headers=owner_headers,
+        params={"business_date": date.today().isoformat(), "status": "PENDING_PAYMENT"},
+    )
+    assert customer_orders_response.status_code == 200, customer_orders_response.text
+    assert payload["order"]["id"] in {
+        order["id"]
+        for order in customer_orders_response.json()
+        if order["channel"] in {"QR", "WHATSAPP"}
+    }
 
     status_response = api_client.get(
         (

@@ -1,6 +1,8 @@
 import {
   Banknote,
   CheckCircle2,
+  ChefHat,
+  Clock3,
   CreditCard,
   Link2,
   PackageCheck,
@@ -39,12 +41,29 @@ type CustomerStatusLink = {
   expiresInSeconds: number;
 };
 
+const ACTIVE_CUSTOMER_ORDER_STATUSES = ["PENDING_PAYMENT", "QUEUED", "PREPARING"] as const;
+const CUSTOMER_CHANNELS = new Set(["QR", "WHATSAPP"]);
+
 function currentBusinessDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function orderStatusLabel(order: Order) {
+  if (order.payment_status !== "PAID") {
+    return "Waiting for payment";
+  }
+  if (order.order_status === "QUEUED") {
+    return "Paid, waiting for kitchen";
+  }
+  if (order.order_status === "PREPARING") {
+    return "In kitchen";
+  }
+  return order.order_status.replaceAll("_", " ");
+}
+
 export function CashierView({ context, token }: Props) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [readyOrders, setReadyOrders] = useState<Order[]>([]);
   const [uncollectedOrders, setUncollectedOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -72,29 +91,42 @@ export function CashierView({ context, token }: Props) {
     void loadMenu();
   }, [loadMenu]);
 
-  const loadPickupOrders = useCallback(async () => {
+  const loadOrderDesk = useCallback(async () => {
     setError(null);
     try {
-      const [ready, uncollected] = await Promise.all([
-        apiRequest<Order[]>(
-          `/api/v1/restaurants/${context.restaurant.id}/branches/${context.branch.id}/orders/`,
-          { token, params: { business_date: currentBusinessDate(), status: "READY" } },
+      const orderPath = `/api/v1/restaurants/${context.restaurant.id}/branches/${context.branch.id}/orders/`;
+      const orderParams = { business_date: currentBusinessDate() };
+      const [pendingPayment, queued, preparing, ready, uncollected] = await Promise.all([
+        ...ACTIVE_CUSTOMER_ORDER_STATUSES.map((status) =>
+          apiRequest<Order[]>(orderPath, {
+            token,
+            params: { ...orderParams, status },
+          }),
         ),
-        apiRequest<Order[]>(
-          `/api/v1/restaurants/${context.restaurant.id}/branches/${context.branch.id}/orders/`,
-          { token, params: { business_date: currentBusinessDate(), status: "UNCOLLECTED" } },
-        ),
+        apiRequest<Order[]>(orderPath, {
+          token,
+          params: { ...orderParams, status: "READY" },
+        }),
+        apiRequest<Order[]>(orderPath, {
+          token,
+          params: { ...orderParams, status: "UNCOLLECTED" },
+        }),
       ]);
+      setCustomerOrders(
+        [...pendingPayment, ...queued, ...preparing].filter((order) =>
+          CUSTOMER_CHANNELS.has(order.channel),
+        ),
+      );
       setReadyOrders(ready);
       setUncollectedOrders(uncollected);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load pickup orders");
+      setError(caught instanceof Error ? caught.message : "Could not load order desk");
     }
   }, [context.restaurant.id, context.branch.id, token]);
 
   useEffect(() => {
-    void loadPickupOrders();
-  }, [loadPickupOrders]);
+    void loadOrderDesk();
+  }, [loadOrderDesk]);
 
   useEffect(() => {
     const socket = new WebSocket(
@@ -106,11 +138,11 @@ export function CashierView({ context, token }: Props) {
     socket.onmessage = (message) => {
       const event = JSON.parse(message.data) as { type: string };
       if (event.type !== "CONNECTED") {
-        void loadPickupOrders();
+        void loadOrderDesk();
       }
     };
     return () => socket.close();
-  }, [context.restaurant.id, context.branch.id, loadPickupOrders, token]);
+  }, [context.restaurant.id, context.branch.id, loadOrderDesk, token]);
 
   const cartTotal = useMemo(() => {
     return cart.reduce((total, line) => {
@@ -208,7 +240,7 @@ export function CashierView({ context, token }: Props) {
       );
       setLastOrder({ ...lastOrder, payment_status: "PAID", order_status: "QUEUED" });
       setNotice(`${lastOrder.display_number} paid and queued`);
-      await loadPickupOrders();
+      await loadOrderDesk();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not confirm cash");
     } finally {
@@ -252,7 +284,7 @@ export function CashierView({ context, token }: Props) {
       if (lastOrder?.id === updatedOrder.id) {
         setLastOrder(updatedOrder);
       }
-      await loadPickupOrders();
+      await loadOrderDesk();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `Could not mark order ${action}`);
     } finally {
@@ -389,12 +421,57 @@ export function CashierView({ context, token }: Props) {
       </div>
 
       <Panel
+        title={`Customer Orders (${customerOrders.length})`}
+        action={
+          <button
+            className="icon-button"
+            type="button"
+            onClick={loadOrderDesk}
+            title="Refresh customer orders"
+          >
+            <RefreshCw size={17} />
+          </button>
+        }
+      >
+        <div className="order-grid">
+          {customerOrders.map((order) => (
+            <article
+              className="order-card"
+              data-testid={`customer-order-${order.id}`}
+              key={order.id}
+            >
+              <div className="order-card-header">
+                <span className="status-pill">
+                  {order.payment_status === "PAID" ? (
+                    <ChefHat size={14} />
+                  ) : (
+                    <Clock3 size={14} />
+                  )}
+                  {orderStatusLabel(order)}
+                </span>
+                <span className="channel-pill">{order.channel}</span>
+              </div>
+              <h3>{order.display_number}</h3>
+              <p>{order.payment_reference}</p>
+              <div className="order-meta">
+                <span>{order.payment_status}</span>
+                <strong>{formatMoney(order.total, order.currency)}</strong>
+              </div>
+            </article>
+          ))}
+          {!customerOrders.length ? (
+            <EmptyState>No active QR or WhatsApp orders right now</EmptyState>
+          ) : null}
+        </div>
+      </Panel>
+
+      <Panel
         title={`Pickup Desk (${readyOrders.length})`}
         action={
           <button
             className="icon-button"
             type="button"
-            onClick={loadPickupOrders}
+            onClick={loadOrderDesk}
             title="Refresh pickup desk"
           >
             <RefreshCw size={17} />
