@@ -168,6 +168,19 @@ def test_public_order_can_be_prepared_before_transfer_confirmation(
     payload = order_response.json()
     order = payload["order"]
 
+    early_confirm_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant.id}/orders/{order['id']}/payments/mobile-transfer/confirm",
+        headers=owner_headers,
+        json={
+            "amount_received": "55.00",
+            "payment_reference_used": order["payment_reference"],
+        },
+    )
+    assert early_confirm_response.status_code == 400
+    assert early_confirm_response.json()["detail"] == (
+        "Mobile transfer can only be confirmed when the order is ready for collection"
+    )
+
     start_response = api_client.post(
         f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}/kitchen/orders/{order['id']}/start",
         headers=owner_headers,

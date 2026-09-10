@@ -637,15 +637,22 @@ export function CashierView({ context, token }: Props) {
               </div>
               <div className="button-row">
                 {order.payment_provider ? (
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={() => startMobileTransferConfirmation(order)}
-                    disabled={isBusy}
-                  >
-                    <Banknote size={17} />
-                    Confirm transfer
-                  </button>
+                  order.order_status === "READY" ? (
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => startMobileTransferConfirmation(order)}
+                      disabled={isBusy}
+                    >
+                      <Banknote size={17} />
+                      Confirm transfer
+                    </button>
+                  ) : (
+                    <button className="secondary-action" type="button" disabled>
+                      <Clock3 size={17} />
+                      In progress
+                    </button>
+                  )
                 ) : (
                   <>
                     <button

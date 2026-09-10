@@ -307,12 +307,24 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   );
 
   const customerOrder = page.getByTestId(`customer-order-${orderId}`);
+  await expect(customerOrder.getByRole("button", { name: "Confirm transfer" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Kitchen" }).click();
+  const kitchenOrder = page.getByTestId(`kitchen-order-${orderId}`);
+  await expect(kitchenOrder).toBeVisible();
+  await kitchenOrder.getByRole("button", { name: "Start" }).click();
+  await expect(page.getByTestId(`kitchen-order-${orderId}`)).toContainText("PREPARING");
+  await page.getByTestId(`kitchen-order-${orderId}`).getByRole("button", { name: "Ready" }).click();
+
+  await page.getByRole("button", { name: "Cashier" }).click();
+  await expect(customerOrder).toContainText("Ready, awaiting payment");
   await customerOrder.getByRole("button", { name: "Confirm transfer" }).click();
   await customerOrder.getByLabel("Payment reference used").fill(customerPaymentReference);
   await customerOrder.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(customerOrder).toBeHidden();
-  await page.getByRole("button", { name: "Kitchen" }).click();
-  await expect(page.getByTestId(`kitchen-order-${orderId}`)).toBeVisible();
+
+  const pickupOrder = page.getByTestId(`pickup-order-${orderId}`);
+  await expect(pickupOrder).toBeVisible();
 
   await api.dispose();
 });

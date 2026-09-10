@@ -15,13 +15,6 @@ from app.payments.models import Payment, PaymentEvent
 from app.payments.providers import REMOTE_PAYMENT_PROVIDERS, PaymentRequest, get_payment_provider
 from app.realtime.events import publish_order_event
 
-PAYMENT_CONFIRMABLE_ORDER_STATUSES = {
-    OrderStatus.PENDING_PAYMENT.value,
-    OrderStatus.QUEUED.value,
-    OrderStatus.PREPARING.value,
-    OrderStatus.READY.value,
-}
-
 
 def get_order_for_payment(db: Session, restaurant_id: UUID, order_id: UUID) -> Order | None:
     return (
@@ -50,16 +43,16 @@ def initiate_payment(
         raise ValueError("Order not found")
     if order.payment_status == PaymentStatus.PAID.value:
         raise ValueError("Order is already paid")
-    if order.order_status != OrderStatus.PENDING_PAYMENT.value:
-        raise ValueError("Payment can only be initiated for pending-payment orders")
-
     if order.payment is not None:
         if order.payment.provider != provider.provider_name:
             raise ValueError(
                 f"Order already has a payment attempt with provider {order.payment.provider}"
             )
         return order.payment
+    if order.order_status != OrderStatus.PENDING_PAYMENT.value:
+        raise ValueError("Payment can only be initiated for pending-payment orders")
 
+    previous_order_status = order.order_status
     provider_result = provider.initiate_payment(
         PaymentRequest(
             order_id=str(order.id),
@@ -100,14 +93,20 @@ def initiate_payment(
             action="PAYMENT_INITIATED",
             entity_type="order",
             entity_id=order.id,
-            old_values={"payment_status": order.payment_status},
+            old_values={
+                "payment_status": order.payment_status,
+                "order_status": previous_order_status,
+            },
             new_values={
                 "provider": provider_result.provider,
                 "payment_status": provider_result.status,
+                "order_status": OrderStatus.QUEUED.value,
                 "reference": provider_result.reference,
             },
         )
     )
+    transition_order(db, order, OrderStatus.CONFIRMED, initiated_by, commit=False)
+    transition_order(db, order, OrderStatus.QUEUED, initiated_by, commit=False)
     db.commit()
     db.refresh(payment)
     return payment
@@ -335,8 +334,10 @@ def confirm_mobile_transfer_payment(
         raise ValueError("Only mobile transfer payments can be manually confirmed here")
     if payment.status == PaymentStatus.PAID.value:
         raise ValueError("Order is already paid")
-    if order.order_status not in PAYMENT_CONFIRMABLE_ORDER_STATUSES:
-        raise ValueError("Mobile transfer can only be confirmed before collection")
+    if order.order_status != OrderStatus.READY.value:
+        raise ValueError(
+            "Mobile transfer can only be confirmed when the order is ready for collection"
+        )
     if amount_received < Decimal(order.total):
         raise ValueError("Amount received is less than order total")
 
@@ -363,10 +364,6 @@ def confirm_mobile_transfer_payment(
             },
         )
     )
-    if previous_order_status == OrderStatus.PENDING_PAYMENT.value:
-        transition_order(db, order, OrderStatus.CONFIRMED, confirmed_by, commit=False)
-        transition_order(db, order, OrderStatus.QUEUED, confirmed_by, commit=False)
-
     db.add(
         AuditLog(
             restaurant_id=restaurant_id,

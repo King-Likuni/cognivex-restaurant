@@ -182,6 +182,21 @@ def test_mobile_transfer_payment_can_be_manually_confirmed(
     payment = initiate_response.json()
     assert payment["status"] == PaymentStatus.PENDING.value
 
+    order_record = db_session.query(Order).filter(Order.id == UUID(order["id"])).one()
+    assert order_record.order_status == OrderStatus.QUEUED.value
+
+    start_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=headers,
+    )
+    assert start_response.status_code == 200, start_response.text
+    ready_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/ready",
+        headers=headers,
+    )
+    assert ready_response.status_code == 200, ready_response.text
+    assert ready_response.json()["payment_status"] == PaymentStatus.PENDING.value
+
     confirm_response = api_client.post(
         f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
         headers=headers,
@@ -196,9 +211,9 @@ def test_mobile_transfer_payment_can_be_manually_confirmed(
     assert confirmed_payment["status"] == PaymentStatus.PAID.value
     assert confirmed_payment["provider_transaction_id"] is None
 
-    order_record = db_session.query(Order).filter(Order.id == UUID(order["id"])).one()
+    db_session.refresh(order_record)
     assert order_record.payment_status == PaymentStatus.PAID.value
-    assert order_record.order_status == OrderStatus.QUEUED.value
+    assert order_record.order_status == OrderStatus.READY.value
 
     events = (
         db_session.query(PaymentEvent)
@@ -228,6 +243,16 @@ def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
         json={"provider": "ORANGE_MONEY", "customer_phone_number": "+26770000000"},
     )
     assert initiate_response.status_code == 201, initiate_response.text
+    start_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=headers,
+    )
+    assert start_response.status_code == 200, start_response.text
+    ready_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/ready",
+        headers=headers,
+    )
+    assert ready_response.status_code == 200, ready_response.text
 
     confirm_response = api_client.post(
         f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
