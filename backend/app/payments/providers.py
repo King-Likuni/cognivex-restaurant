@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from app.orders.enums import PaymentStatus
 
-REMOTE_PAYMENT_PROVIDERS = {"ORANGE_MONEY", "FNB"}
+REMOTE_PAYMENT_PROVIDERS = {"ORANGE_MONEY", "PAY2CELL"}
 
 
 @dataclass(frozen=True)

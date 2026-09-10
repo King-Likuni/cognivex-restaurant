@@ -53,6 +53,7 @@ class OrderResponse(BaseModel):
     total: Decimal
     currency: str
     payment_status: str
+    payment_provider: str | None = None
     order_status: str
     created_by: UUID | None
     created_at: datetime | None

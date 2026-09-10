@@ -72,6 +72,10 @@ class Order(Base):
     status_history = relationship("OrderStatusHistory", back_populates="order")
     payment = relationship("Payment", uselist=False, back_populates="order")
 
+    @property
+    def payment_provider(self) -> str | None:
+        return self.payment.provider if self.payment else None
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"

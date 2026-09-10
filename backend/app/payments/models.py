@@ -27,7 +27,7 @@ class Payment(Base):
         UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True
     )
 
-    provider = Column(String, nullable=False)  # CASH, ORANGE_MONEY, FNB
+    provider = Column(String, nullable=False)  # CASH, ORANGE_MONEY, PAY2CELL
     reference = Column(String, nullable=False, unique=True, index=True)  # e.g., CS01-MM-260903-037
     provider_transaction_id = Column(String, nullable=True)
 

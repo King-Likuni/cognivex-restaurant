@@ -41,6 +41,8 @@ type CustomerStatusLink = {
   expiresInSeconds: number;
 };
 
+type RemotePaymentProvider = "ORANGE_MONEY" | "PAY2CELL";
+
 type MobileTransferConfirmation = {
   orderId: string;
   amountReceived: string;
@@ -74,6 +76,16 @@ function cashierErrorMessage(caught: unknown, fallback: string) {
     return `${fallback}. Refresh the page, confirm the branch is Main Mall, and try again.`;
   }
   return message;
+}
+
+function formatProvider(provider: string | null) {
+  if (provider === "PAY2CELL") {
+    return "Pay2Cell";
+  }
+  if (provider === "ORANGE_MONEY") {
+    return "Orange Money";
+  }
+  return provider ?? "No transfer method";
 }
 
 export function CashierView({ context, token }: Props) {
@@ -260,7 +272,7 @@ export function CashierView({ context, token }: Props) {
     }
   }
 
-  async function initiateRemotePayment(provider: "ORANGE_MONEY" | "FNB") {
+  async function initiateRemotePayment(provider: RemotePaymentProvider) {
     if (!lastOrder) {
       return;
     }
@@ -276,7 +288,7 @@ export function CashierView({ context, token }: Props) {
         },
       );
       setRemotePayment(payment);
-      setNotice(`${provider} payment initiated`);
+      setNotice(`${formatProvider(provider)} payment initiated`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not initiate payment");
     } finally {
@@ -478,6 +490,15 @@ export function CashierView({ context, token }: Props) {
                     Orange Money
                   </button>
                   <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => initiateRemotePayment("PAY2CELL")}
+                    disabled={isBusy}
+                  >
+                    <CreditCard size={17} />
+                    Pay2Cell
+                  </button>
+                  <button
                     className="secondary-action danger-action"
                     type="button"
                     onClick={() => void cancelOrder(lastOrder)}
@@ -499,7 +520,9 @@ export function CashierView({ context, token }: Props) {
                 </div>
               ) : null}
               {remotePayment ? (
-                <Notice>Remote payment reference: {remotePayment.reference}</Notice>
+                <Notice>
+                  {formatProvider(remotePayment.provider)} reference: {remotePayment.reference}
+                </Notice>
               ) : null}
             </div>
           ) : null}
@@ -588,6 +611,7 @@ export function CashierView({ context, token }: Props) {
               <h3>{order.display_number}</h3>
               <p>{order.payment_reference}</p>
               <div className="order-meta">
+                <span>{formatProvider(order.payment_provider)}</span>
                 <span>{order.payment_status}</span>
                 <strong>{formatMoney(order.total, order.currency)}</strong>
               </div>

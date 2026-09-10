@@ -15,6 +15,8 @@ type CartLine = {
   quantity: number;
 };
 
+type RemotePaymentProvider = "ORANGE_MONEY" | "PAY2CELL";
+
 const CHICKEN_SPOT_MAIN_MALL = {
   restaurantId:
     import.meta.env.VITE_PUBLIC_RESTAURANT_ID ?? "db74a923-21c7-442a-8937-71bde3d9aa9c",
@@ -45,12 +47,24 @@ function readOrderRoute() {
   };
 }
 
+function formatProvider(provider: string | null) {
+  if (provider === "PAY2CELL") {
+    return "Pay2Cell";
+  }
+  if (provider === "ORANGE_MONEY") {
+    return "Orange Money";
+  }
+  return provider ?? "Transfer";
+}
+
 export function CustomerOrderView() {
   const route = useMemo(() => readOrderRoute(), []);
   const [menu, setMenu] = useState<PublicMenu | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [paymentProvider, setPaymentProvider] =
+    useState<RemotePaymentProvider>("ORANGE_MONEY");
   const [orderResult, setOrderResult] = useState<PublicCustomerOrderResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -132,7 +146,7 @@ export function CustomerOrderView() {
             customer_name: customerName.trim() || null,
             customer_phone_number: phoneNumber.trim(),
             channel: route.channel,
-            payment_provider: "ORANGE_MONEY",
+            payment_provider: paymentProvider,
             items: cart.map((line) => ({
               menu_item_id: line.menuItemId,
               quantity: line.quantity,
@@ -245,6 +259,10 @@ export function CustomerOrderView() {
                   <span>Amount</span>
                   <strong>{formatMoney(orderResult.order.total, orderResult.order.currency)}</strong>
                 </div>
+                <div className="payment-detail-row">
+                  <span>Method</span>
+                  <strong>{formatProvider(orderResult.payment.provider)}</strong>
+                </div>
                 <button className="secondary-action" type="button" onClick={copyPaymentReference}>
                   <Copy size={17} />
                   Copy reference
@@ -265,6 +283,17 @@ export function CustomerOrderView() {
                 onChange={(event) => setPhoneNumber(event.target.value)}
                 placeholder="+267..."
               />
+            </Field>
+            <Field label="Payment method">
+              <select
+                value={paymentProvider}
+                onChange={(event) =>
+                  setPaymentProvider(event.target.value as RemotePaymentProvider)
+                }
+              >
+                <option value="ORANGE_MONEY">Orange Money</option>
+                <option value="PAY2CELL">Pay2Cell</option>
+              </select>
             </Field>
             <div className="total-row">
               <span>Total</span>

@@ -279,21 +279,21 @@ def test_payment_webhook_rejects_amount_mismatch(
     payment = api_client.post(
         f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments",
         headers=headers,
-        json={"provider": "FNB"},
+        json={"provider": "PAY2CELL"},
     ).json()
 
     body, signed_headers = signed_webhook_headers(
         {
-            "provider_event_id": "fnb-event-001",
+            "provider_event_id": "pay2cell-event-001",
             "reference": payment["reference"],
             "status": PaymentStatus.PAID.value,
             "amount": "54.99",
             "currency": "BWP",
-            "provider_transaction_id": "fnb-txn-001",
+            "provider_transaction_id": "pay2cell-txn-001",
         }
     )
     response = api_client.post(
-        "/api/v1/webhooks/payments/FNB",
+        "/api/v1/webhooks/payments/PAY2CELL",
         content=body,
         headers=signed_headers,
     )

@@ -62,6 +62,7 @@ def test_public_menu_and_qr_order_flow(api_client, db_session, seeded_restaurant
     payload = order_response.json()
     assert payload["order"]["channel"] == "QR"
     assert payload["order"]["total"] == "110.00"
+    assert payload["order"]["payment_provider"] == "ORANGE_MONEY"
     assert payload["payment"]["provider"] == "ORANGE_MONEY"
     assert payload["payment"]["status"] == "PENDING"
     assert payload["status_token"]["access_token"]
@@ -130,6 +131,28 @@ def test_public_whatsapp_channel_order_flow(api_client, db_session, seeded_resta
     payload = order_response.json()
     assert payload["order"]["channel"] == "WHATSAPP"
     assert payload["payment"]["status"] == "PENDING"
+
+
+def test_public_customer_can_choose_pay2cell(api_client, db_session, seeded_restaurant):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    item = create_public_menu_item(db_session, restaurant.id)
+
+    order_response = api_client.post(
+        f"/api/v1/public/restaurants/{restaurant.id}/branches/{branch.id}/orders",
+        json={
+            "customer_name": "Pay2Cell Customer",
+            "customer_phone_number": "+26776667777",
+            "channel": "QR",
+            "payment_provider": "PAY2CELL",
+            "items": [{"menu_item_id": str(item.id), "quantity": 1}],
+        },
+    )
+    assert order_response.status_code == 201, order_response.text
+    payload = order_response.json()
+    assert payload["order"]["payment_provider"] == "PAY2CELL"
+    assert payload["payment"]["provider"] == "PAY2CELL"
+    assert payload["payment"]["reference"] == payload["order"]["payment_reference"]
 
 
 def test_public_customer_order_rejects_cash_payment(api_client, db_session, seeded_restaurant):
