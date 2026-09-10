@@ -133,6 +133,7 @@ def create_public_customer_order(
             customer_phone_number=data.customer_phone_number,
             initiated_by=None,
         )
+        order = order_service.queue_customer_order_for_preparation(db, order)
         status_token = create_order_status_token(restaurant_id, branch_id, order.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

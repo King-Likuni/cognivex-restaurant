@@ -278,6 +278,13 @@ def create_customer_order(
     )
 
 
+def queue_customer_order_for_preparation(db: Session, order: Order) -> Order:
+    if order.order_status != OrderStatus.PENDING_PAYMENT.value:
+        return order
+    transition_order(db, order, OrderStatus.CONFIRMED, None, commit=False)
+    return transition_order(db, order, OrderStatus.QUEUED, None)
+
+
 def get_order(
     db: Session,
     restaurant_id: UUID,

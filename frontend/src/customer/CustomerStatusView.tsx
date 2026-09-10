@@ -22,7 +22,10 @@ function readCustomerRoute() {
   };
 }
 
-function statusCopy(status: string) {
+function statusCopy(status: string, paymentStatus?: string) {
+  if (paymentStatus && paymentStatus !== "PAID" && status !== "PENDING_PAYMENT") {
+    return "Your order is moving through the kitchen. Keep your payment proof ready for collection.";
+  }
   if (status === "PENDING_PAYMENT") {
     return "Payment is being confirmed";
   }
@@ -110,7 +113,7 @@ export function CustomerStatusView() {
             </span>
             <ReceiptText size={40} />
             <h1>{status.display_number}</h1>
-            <p>{statusCopy(status.order_status)}</p>
+            <p>{statusCopy(status.order_status, status.payment_status)}</p>
             <div className="status-steps" aria-label="Order progress">
               {[
                 { key: "QUEUED", label: "Queued", icon: Clock3 },
@@ -138,7 +141,7 @@ export function CustomerStatusView() {
           {events.map((event) => (
             <div className="event-row" key={`${event.type}-${event.occurred_at}`}>
               <strong>{event.display_number}</strong>
-              <span>{statusCopy(event.order_status)}</span>
+              <span>{statusCopy(event.order_status, event.payment_status)}</span>
             </div>
           ))}
           {!events.length ? <EmptyState>Updates will appear here automatically</EmptyState> : null}

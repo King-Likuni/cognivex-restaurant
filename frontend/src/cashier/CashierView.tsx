@@ -58,6 +58,15 @@ const CLOSED_ORDER_STATUSES = new Set([
 
 function orderStatusLabel(order: Order) {
   if (order.payment_status !== "PAID") {
+    if (order.order_status === "READY") {
+      return "Ready, awaiting payment";
+    }
+    if (order.order_status === "PREPARING") {
+      return "Preparing, payment pending";
+    }
+    if (order.order_status === "QUEUED") {
+      return "Queued, payment pending";
+    }
     return "Waiting for payment";
   }
   if (order.order_status === "QUEUED") {
@@ -140,7 +149,9 @@ export function CashierView({ context, token }: Props) {
             order.payment_status !== "PAID" && !CLOSED_ORDER_STATUSES.has(order.order_status),
         ),
       );
-      setReadyOrders(orders.filter((order) => order.order_status === "READY"));
+      setReadyOrders(
+        orders.filter((order) => order.order_status === "READY" && order.payment_status === "PAID"),
+      );
       setUncollectedOrders(orders.filter((order) => order.order_status === "UNCOLLECTED"));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load order desk");
@@ -475,7 +486,7 @@ export function CashierView({ context, token }: Props) {
             <div className="result-card" data-testid="last-order-card">
               <span className="status-pill">{lastOrder.order_status}</span>
               <h3 data-testid="last-order-number">{lastOrder.display_number}</h3>
-              <p>{lastOrder.payment_reference}</p>
+              <p>Reference is hidden. Enter it only from the customer proof of payment.</p>
               {canCancelOrder(lastOrder) ? (
                 <div className="button-row">
                   <button
@@ -528,7 +539,8 @@ export function CashierView({ context, token }: Props) {
               ) : null}
               {remotePayment ? (
                 <Notice>
-                  {formatProvider(remotePayment.provider)} reference: {remotePayment.reference}
+                  {formatProvider(remotePayment.provider)} transfer started. Confirm it from the
+                  Payment Queue when the customer shows proof.
                 </Notice>
               ) : null}
             </div>
@@ -584,7 +596,8 @@ export function CashierView({ context, token }: Props) {
                           paymentReferenceUsed: event.target.value,
                         })
                       }
-                      placeholder={order.payment_reference}
+                      placeholder="Enter reference from customer proof"
+                      autoComplete="off"
                     />
                   </Field>
                   <div className="button-row">
@@ -616,7 +629,7 @@ export function CashierView({ context, token }: Props) {
                 <span className="channel-pill">{order.channel}</span>
               </div>
               <h3>{order.display_number}</h3>
-              <p>{order.payment_reference}</p>
+              <p>Reference hidden until the customer provides proof of payment.</p>
               <div className="order-meta">
                 <span>{formatProvider(order.payment_provider)}</span>
                 <span>{order.payment_status}</span>
@@ -704,7 +717,7 @@ export function CashierView({ context, token }: Props) {
                   Ready
                 </span>
                 <h3>{order.display_number}</h3>
-                <p>{order.payment_reference}</p>
+                <p>Paid and ready for pickup</p>
                 <strong>{formatMoney(order.total, order.currency)}</strong>
                 <div className="button-row">
                   <button
@@ -740,7 +753,7 @@ export function CashierView({ context, token }: Props) {
               >
                 <span className="status-pill">{order.order_status}</span>
                 <h3>{order.display_number}</h3>
-                <p>{order.payment_reference}</p>
+                <p>Not collected during this service window</p>
               </article>
             ))}
             {!uncollectedOrders.length ? <EmptyState>No missed pickups today</EmptyState> : null}

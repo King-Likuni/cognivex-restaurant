@@ -15,6 +15,13 @@ from app.payments.models import Payment, PaymentEvent
 from app.payments.providers import REMOTE_PAYMENT_PROVIDERS, PaymentRequest, get_payment_provider
 from app.realtime.events import publish_order_event
 
+PAYMENT_CONFIRMABLE_ORDER_STATUSES = {
+    OrderStatus.PENDING_PAYMENT.value,
+    OrderStatus.QUEUED.value,
+    OrderStatus.PREPARING.value,
+    OrderStatus.READY.value,
+}
+
 
 def get_order_for_payment(db: Session, restaurant_id: UUID, order_id: UUID) -> Order | None:
     return (
@@ -328,8 +335,8 @@ def confirm_mobile_transfer_payment(
         raise ValueError("Only mobile transfer payments can be manually confirmed here")
     if payment.status == PaymentStatus.PAID.value:
         raise ValueError("Order is already paid")
-    if order.order_status != OrderStatus.PENDING_PAYMENT.value:
-        raise ValueError("Mobile transfer can only be confirmed for pending-payment orders")
+    if order.order_status not in PAYMENT_CONFIRMABLE_ORDER_STATUSES:
+        raise ValueError("Mobile transfer can only be confirmed before collection")
     if amount_received < Decimal(order.total):
         raise ValueError("Amount received is less than order total")
 
@@ -356,6 +363,10 @@ def confirm_mobile_transfer_payment(
             },
         )
     )
+    if previous_order_status == OrderStatus.PENDING_PAYMENT.value:
+        transition_order(db, order, OrderStatus.CONFIRMED, confirmed_by, commit=False)
+        transition_order(db, order, OrderStatus.QUEUED, confirmed_by, commit=False)
+
     db.add(
         AuditLog(
             restaurant_id=restaurant_id,
@@ -370,16 +381,13 @@ def confirm_mobile_transfer_payment(
             new_values={
                 "provider": payment.provider,
                 "payment_status": PaymentStatus.PAID.value,
-                "order_status": OrderStatus.QUEUED.value,
+                "order_status": order.order_status,
                 "amount_received": str(amount_received),
                 "amount_paid": str(order.total),
                 "payment_reference_used": normalized_payment_reference,
             },
         )
     )
-
-    transition_order(db, order, OrderStatus.CONFIRMED, confirmed_by, commit=False)
-    transition_order(db, order, OrderStatus.QUEUED, confirmed_by, commit=False)
 
     db.commit()
     db.refresh(payment)

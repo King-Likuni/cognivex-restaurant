@@ -141,7 +141,9 @@ export function KitchenView({ context, token }: Props) {
                   >
                     <span className="status-pill">{order.order_status}</span>
                     <h3>{order.display_number}</h3>
-                    <p>{order.payment_reference}</p>
+                    <p>
+                      {order.channel} | {order.payment_status}
+                    </p>
                     <strong>{order.currency} {order.total}</strong>
                     {column.action && Icon ? (
                       <button

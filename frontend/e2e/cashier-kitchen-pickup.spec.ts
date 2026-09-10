@@ -30,6 +30,7 @@ type Order = {
   id: string;
   business_date: string;
   display_number: string;
+  payment_reference: string;
   order_status: string;
   total: string;
 };
@@ -162,6 +163,7 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   const paymentQueueOrder = page.getByTestId(`customer-order-${pendingOrder!.id}`);
   await expect(paymentQueueOrder).toBeVisible();
   await expect(paymentQueueOrder).toContainText("CASHIER");
+  await expect(paymentQueueOrder).not.toContainText(pendingOrder!.payment_reference);
   await paymentQueueOrder.getByRole("button", { name: "Cash paid" }).click();
   await expect(page.getByText(`${orderNumber} paid and queued`)).toBeVisible();
 
@@ -283,7 +285,11 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   }
 
   await statusLink.click();
-  await expect(page.getByText("Payment is being confirmed")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Your order is moving through the kitchen. Keep your payment proof ready for collection.",
+    ),
+  ).toBeVisible();
 
   await page.goto("/");
   await page.getByLabel("Email").fill(OWNER_EMAIL);
@@ -292,8 +298,13 @@ test("customer can place a QR order and open the status page", async ({ page }) 
 
   await expect(page.getByTestId("branch-picker")).toHaveValue(data.branchId);
   await expect(page.getByTestId(`customer-order-${orderId}`)).toBeVisible();
-  await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("Waiting for payment");
+  await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText(
+    "Queued, payment pending",
+  );
   await expect(page.getByTestId(`customer-order-${orderId}`)).toContainText("QR");
+  await expect(page.getByTestId(`customer-order-${orderId}`)).not.toContainText(
+    customerPaymentReference,
+  );
 
   const customerOrder = page.getByTestId(`customer-order-${orderId}`);
   await customerOrder.getByRole("button", { name: "Confirm transfer" }).click();
