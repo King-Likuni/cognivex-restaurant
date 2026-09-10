@@ -49,7 +49,6 @@ type MobileTransferConfirmation = {
   paymentReferenceUsed: string;
 };
 
-const CUSTOMER_CHANNELS = new Set(["QR", "WHATSAPP"]);
 const CLOSED_ORDER_STATUSES = new Set([
   "COLLECTED",
   "UNCOLLECTED",
@@ -138,7 +137,7 @@ export function CashierView({ context, token }: Props) {
       setCustomerOrders(
         orders.filter(
           (order) =>
-            CUSTOMER_CHANNELS.has(order.channel) && !CLOSED_ORDER_STATUSES.has(order.order_status),
+            order.payment_status !== "PAID" && !CLOSED_ORDER_STATUSES.has(order.order_status),
         ),
       );
       setReadyOrders(orders.filter((order) => order.order_status === "READY"));
@@ -224,6 +223,7 @@ export function CashierView({ context, token }: Props) {
       void createCustomerStatusLink(order);
       setCart([]);
       setNotice(`Created ${order.display_number}`);
+      await loadOrderDesk();
     } catch (caught) {
       setError(cashierErrorMessage(caught, "Could not create order"));
     } finally {
@@ -247,23 +247,22 @@ export function CashierView({ context, token }: Props) {
     }
   }
 
-  async function confirmCash() {
-    if (!lastOrder) {
-      return;
-    }
+  async function confirmCashPayment(order: Order) {
     setIsBusy(true);
     setError(null);
     try {
       await apiRequest<Payment>(
-        `/api/v1/restaurants/${context.restaurant.id}/orders/${lastOrder.id}/payments/cash/confirm`,
+        `/api/v1/restaurants/${context.restaurant.id}/orders/${order.id}/payments/cash/confirm`,
         {
           method: "POST",
           token,
-          body: { amount_received: lastOrder.total },
+          body: { amount_received: order.total },
         },
       );
-      setLastOrder({ ...lastOrder, payment_status: "PAID", order_status: "QUEUED" });
-      setNotice(`${lastOrder.display_number} paid and queued`);
+      if (lastOrder?.id === order.id) {
+        setLastOrder({ ...order, payment_status: "PAID", order_status: "QUEUED" });
+      }
+      setNotice(`${order.display_number} paid and queued`);
       await loadOrderDesk();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not confirm cash");
@@ -272,23 +271,31 @@ export function CashierView({ context, token }: Props) {
     }
   }
 
-  async function initiateRemotePayment(provider: RemotePaymentProvider) {
+  async function confirmCash() {
     if (!lastOrder) {
       return;
     }
+    await confirmCashPayment(lastOrder);
+  }
+
+  async function initiateRemotePayment(order: Order, provider: RemotePaymentProvider) {
     setIsBusy(true);
     setError(null);
     try {
       const payment = await apiRequest<Payment>(
-        `/api/v1/restaurants/${context.restaurant.id}/orders/${lastOrder.id}/payments`,
+        `/api/v1/restaurants/${context.restaurant.id}/orders/${order.id}/payments`,
         {
           method: "POST",
           token,
           body: { provider, customer_phone_number: "+26770000000" },
         },
       );
-      setRemotePayment(payment);
+      if (lastOrder?.id === order.id) {
+        setLastOrder({ ...order, payment_provider: payment.provider });
+        setRemotePayment(payment);
+      }
       setNotice(`${formatProvider(provider)} payment initiated`);
+      await loadOrderDesk();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not initiate payment");
     } finally {
@@ -483,7 +490,7 @@ export function CashierView({ context, token }: Props) {
                   <button
                     className="secondary-action"
                     type="button"
-                    onClick={() => initiateRemotePayment("ORANGE_MONEY")}
+                    onClick={() => void initiateRemotePayment(lastOrder, "ORANGE_MONEY")}
                     disabled={isBusy}
                   >
                     <CreditCard size={17} />
@@ -492,7 +499,7 @@ export function CashierView({ context, token }: Props) {
                   <button
                     className="secondary-action"
                     type="button"
-                    onClick={() => initiateRemotePayment("PAY2CELL")}
+                    onClick={() => void initiateRemotePayment(lastOrder, "PAY2CELL")}
                     disabled={isBusy}
                   >
                     <CreditCard size={17} />
@@ -530,13 +537,13 @@ export function CashierView({ context, token }: Props) {
       </div>
 
       <Panel
-        title={`Customer Orders (${customerOrders.length})`}
+        title={`Payment Queue (${customerOrders.length})`}
         action={
           <button
             className="icon-button"
             type="button"
             onClick={loadOrderDesk}
-            title="Refresh customer orders"
+            title="Refresh payment queue"
           >
             <RefreshCw size={17} />
           </button>
@@ -615,8 +622,8 @@ export function CashierView({ context, token }: Props) {
                 <span>{order.payment_status}</span>
                 <strong>{formatMoney(order.total, order.currency)}</strong>
               </div>
-              {order.payment_status !== "PAID" ? (
-                <div className="button-row">
+              <div className="button-row">
+                {order.payment_provider ? (
                   <button
                     className="secondary-action"
                     type="button"
@@ -626,21 +633,51 @@ export function CashierView({ context, token }: Props) {
                     <Banknote size={17} />
                     Confirm transfer
                   </button>
-                  <button
-                    className="secondary-action danger-action"
-                    type="button"
-                    onClick={() => void cancelOrder(order)}
-                    disabled={isBusy}
-                  >
-                    <XCircle size={17} />
-                    Cancel order
-                  </button>
-                </div>
-              ) : null}
+                ) : (
+                  <>
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => void confirmCashPayment(order)}
+                      disabled={isBusy}
+                    >
+                      <Banknote size={17} />
+                      Cash paid
+                    </button>
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => void initiateRemotePayment(order, "ORANGE_MONEY")}
+                      disabled={isBusy}
+                    >
+                      <CreditCard size={17} />
+                      Orange Money
+                    </button>
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => void initiateRemotePayment(order, "PAY2CELL")}
+                      disabled={isBusy}
+                    >
+                      <CreditCard size={17} />
+                      Pay2Cell
+                    </button>
+                  </>
+                )}
+                <button
+                  className="secondary-action danger-action"
+                  type="button"
+                  onClick={() => void cancelOrder(order)}
+                  disabled={isBusy}
+                >
+                  <XCircle size={17} />
+                  Cancel order
+                </button>
+              </div>
             </article>
           ))}
           {!customerOrders.length ? (
-            <EmptyState>No active QR or WhatsApp orders right now</EmptyState>
+            <EmptyState>No orders waiting for payment right now</EmptyState>
           ) : null}
         </div>
       </Panel>

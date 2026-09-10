@@ -5,7 +5,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.audit.models import AuditLog
 from app.auth.models import User
@@ -286,6 +286,7 @@ def get_order(
 ) -> Order | None:
     return (
         db.query(Order)
+        .options(selectinload(Order.payment))
         .filter(
             Order.id == order_id,
             Order.restaurant_id == restaurant_id,
@@ -303,9 +304,13 @@ def list_branch_orders(
     business_date: date | None = None,
     status: str | None = None,
 ) -> list[Order]:
-    query = db.query(Order).filter(
-        Order.restaurant_id == restaurant_id,
-        Order.branch_id == branch_id,
+    query = (
+        db.query(Order)
+        .options(selectinload(Order.payment))
+        .filter(
+            Order.restaurant_id == restaurant_id,
+            Order.branch_id == branch_id,
+        )
     )
     if business_date is not None:
         query = query.filter(Order.business_date == business_date)

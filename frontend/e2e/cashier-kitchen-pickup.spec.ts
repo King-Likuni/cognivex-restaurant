@@ -149,7 +149,20 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
 
   await page.getByRole("button", { name: "Create order" }).click();
   const orderNumber = await page.getByTestId("last-order-number").innerText();
-  await page.getByRole("button", { name: "Cash paid" }).click();
+
+  const pendingOrdersResponse = await api.get(
+    `/api/v1/restaurants/${data.restaurantId}/branches/${data.branchId}/orders/`,
+    { headers, params: { status: "PENDING_PAYMENT" } },
+  );
+  expect(pendingOrdersResponse.ok(), await pendingOrdersResponse.text()).toBeTruthy();
+  const pendingOrders = (await pendingOrdersResponse.json()) as Order[];
+  const pendingOrder = pendingOrders.find((candidate) => candidate.display_number === orderNumber);
+  expect(pendingOrder).toBeTruthy();
+
+  const paymentQueueOrder = page.getByTestId(`customer-order-${pendingOrder!.id}`);
+  await expect(paymentQueueOrder).toBeVisible();
+  await expect(paymentQueueOrder).toContainText("CASHIER");
+  await paymentQueueOrder.getByRole("button", { name: "Cash paid" }).click();
   await expect(page.getByText(`${orderNumber} paid and queued`)).toBeVisible();
 
   const ordersResponse = await api.get(
@@ -286,7 +299,9 @@ test("customer can place a QR order and open the status page", async ({ page }) 
   await customerOrder.getByRole("button", { name: "Confirm transfer" }).click();
   await customerOrder.getByLabel("Payment reference used").fill(customerPaymentReference);
   await customerOrder.getByRole("button", { name: "Confirm", exact: true }).click();
-  await expect(customerOrder).toContainText("Paid, waiting for kitchen");
+  await expect(customerOrder).toBeHidden();
+  await page.getByRole("button", { name: "Kitchen" }).click();
+  await expect(page.getByTestId(`kitchen-order-${orderId}`)).toBeVisible();
 
   await api.dispose();
 });
