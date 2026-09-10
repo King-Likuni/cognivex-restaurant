@@ -288,6 +288,14 @@ def test_owner_can_deactivate_placeholder_branch(
     active_branch_ids = {branch["id"] for branch in active_branches_response.json()}
     assert placeholder_branch["id"] not in active_branch_ids
 
+    audit_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/audit-logs/",
+        headers=owner_headers,
+        params={"action": "BRANCH_UPDATED", "entity_type": "branch"},
+    )
+    assert audit_response.status_code == 200, audit_response.text
+    assert any(row["entity_id"] == placeholder_branch["id"] for row in audit_response.json())
+
 
 def test_only_owner_or_admin_can_manage_inactive_branches(
     api_client: TestClient,
@@ -574,6 +582,16 @@ def test_owner_can_manage_restaurant_staff(
     assert updated_cashier["role_name"] == "KITCHEN"
     assert updated_cashier["branch_ids"] == [str(second_branch.id)]
     assert updated_cashier["is_active"] is False
+
+    audit_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/audit-logs/",
+        headers=owner_headers,
+        params={"entity_type": "user", "user_id": str(seeded_restaurant["owner"].id)},
+    )
+    assert audit_response.status_code == 200, audit_response.text
+    assert {"STAFF_CREATED", "STAFF_UPDATED"}.issubset(
+        {row["action"] for row in audit_response.json()}
+    )
 
     login_response = api_client.post(
         "/api/v1/auth/login",

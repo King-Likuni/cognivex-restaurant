@@ -28,6 +28,7 @@ type MenuItem = {
 
 type Order = {
   id: string;
+  business_date: string;
   display_number: string;
   order_status: string;
   total: string;
@@ -51,19 +52,16 @@ type TestData = {
   menuItem: MenuItem;
 };
 
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 async function getDailySalesReport(
   api: APIRequestContext,
   headers: { Authorization: string },
   data: TestData,
+  businessDate?: string,
 ): Promise<DailySalesReport> {
   const response = await api.get(`/api/v1/restaurants/${data.restaurantId}/reports/daily-sales`, {
     headers,
     params: {
-      business_date: todayIsoDate(),
+      business_date: businessDate,
       branch_id: data.branchId,
     },
   });
@@ -136,7 +134,6 @@ async function apiSetup(): Promise<{ api: APIRequestContext; data: TestData }> {
 test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   const { api, data } = await apiSetup();
   const headers = { Authorization: `Bearer ${data.token}` };
-  const baselineReport = await getDailySalesReport(api, headers, data);
 
   await page.addInitScript(() => window.localStorage.clear());
   await page.goto("/");
@@ -163,6 +160,7 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   const queuedOrders = (await ordersResponse.json()) as Order[];
   const order = queuedOrders.find((candidate) => candidate.display_number === orderNumber);
   expect(order).toBeTruthy();
+  const baselineReport = await getDailySalesReport(api, headers, data, order!.business_date);
 
   await page.getByRole("button", { name: "Kitchen" }).click();
   const kitchenOrder = page.getByTestId(`kitchen-order-${order!.id}`);
@@ -180,7 +178,7 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await page.getByRole("button", { name: "Kitchen" }).click();
   await expect(page.getByTestId(`collected-order-${order!.id}`)).toBeVisible();
 
-  const finalReport = await getDailySalesReport(api, headers, data);
+  const finalReport = await getDailySalesReport(api, headers, data, order!.business_date);
   const expectedCollectedOrders = baselineReport.collected_orders + 1;
   const expectedRevenue = (Number(baselineReport.revenue) + 110).toFixed(2);
   expect(finalReport.collected_orders).toBe(expectedCollectedOrders);
@@ -190,6 +188,10 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await expect(page.getByText("Revenue counts paid collected orders only.")).toBeVisible();
   await expect(page.getByTestId("stat-collected")).toContainText(String(expectedCollectedOrders));
   await expect(page.getByTestId("stat-revenue")).toContainText(`BWP ${expectedRevenue}`);
+
+  await page.getByRole("button", { name: "Audit" }).click();
+  await expect(page.getByTestId("audit-log-CASH_PAYMENT_CONFIRMED").first()).toBeVisible();
+  await expect(page.getByTestId("audit-log-ORDER_COLLECTED").first()).toBeVisible();
 
   await api.dispose();
 });

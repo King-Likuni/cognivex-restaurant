@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.audit.models import AuditLog
+from app.auth.schemas import UserCreate
+from app.auth.service import create_user
 from app.orders.enums import OrderStatus, PaymentStatus
 from app.orders.models import OrderStatusHistory
 from app.payments.models import Payment, PaymentEvent
@@ -189,6 +191,19 @@ def test_paid_collected_order_writes_status_history_payment_event_and_audit_log(
         audit_actions["ORDER_COLLECTED"].new_values["order_status"] == OrderStatus.COLLECTED.value
     )
 
+    audit_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/audit-logs/",
+        headers=headers,
+        params={"entity_type": "order", "branch_id": branch_id},
+    )
+    assert audit_response.status_code == 200, audit_response.text
+    audit_payload = audit_response.json()
+    assert {row["action"] for row in audit_payload} >= {
+        "CASH_PAYMENT_CONFIRMED",
+        "ORDER_COLLECTED",
+    }
+    assert all(row["user_email"] == "owner@example.com" for row in audit_payload)
+
 
 def test_uncollected_order_writes_terminal_status_history_and_audit_log(
     api_client: TestClient,
@@ -252,3 +267,32 @@ def test_uncollected_order_writes_terminal_status_history_and_audit_log(
     )
     assert audit_log.old_values["order_status"] == OrderStatus.READY.value
     assert audit_log.new_values["order_status"] == OrderStatus.UNCOLLECTED.value
+
+
+def test_audit_logs_are_owner_admin_only(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    create_user(
+        db_session,
+        UserCreate(
+            email="audit-cashier@example.com",
+            password="cashierpassword",
+            first_name="Audit",
+            last_name="Cashier",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    cashier_headers = login(api_client, "audit-cashier@example.com", "cashierpassword")
+
+    response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/audit-logs/",
+        headers=cashier_headers,
+    )
+
+    assert response.status_code == 403

@@ -147,6 +147,15 @@ def test_cashier_order_to_collected_daily_sale(
     )
     assert report_response.status_code == 200, report_response.text
     report = report_response.json()
+
+    default_report_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
+        headers=owner_headers,
+        params={"branch_id": branch_id},
+    )
+    assert default_report_response.status_code == 200, default_report_response.text
+    assert default_report_response.json() == report
+
     assert report["orders"] == 1
     assert report["collected_orders"] == 1
     assert report["revenue"] == "110.00"

@@ -55,10 +55,6 @@ const CLOSED_ORDER_STATUSES = new Set([
   "PAYMENT_EXPIRED",
 ]);
 
-function currentBusinessDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function orderStatusLabel(order: Order) {
   if (order.payment_status !== "PAID") {
     return "Waiting for payment";
@@ -126,7 +122,6 @@ export function CashierView({ context, token }: Props) {
       const orderPath = `/api/v1/restaurants/${context.restaurant.id}/branches/${context.branch.id}/orders/`;
       const orders = await apiRequest<Order[]>(orderPath, {
         token,
-        params: { business_date: currentBusinessDate() },
       });
       setCustomerOrders(
         orders.filter(

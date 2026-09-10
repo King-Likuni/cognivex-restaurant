@@ -3,6 +3,7 @@ import {
   Boxes,
   Building2,
   ChefHat,
+  ClipboardList,
   CreditCard,
   LogOut,
   RefreshCw,
@@ -16,6 +17,7 @@ import { CashierView } from "./cashier/CashierView";
 import { Field, Notice } from "./components/ui";
 import { CustomerOrderView } from "./customer/CustomerOrderView";
 import { CustomerStatusView } from "./customer/CustomerStatusView";
+import { AuditLogView } from "./manager/AuditLogView";
 import { BranchManagementView } from "./manager/BranchManagementView";
 import { InventoryView } from "./manager/InventoryView";
 import { DashboardView } from "./manager/DashboardView";
@@ -40,7 +42,14 @@ export type AppContext = {
   branch: Branch;
 };
 
-type ViewKey = "cashier" | "kitchen" | "inventory" | "dashboard" | "branches" | "staff";
+type ViewKey =
+  | "cashier"
+  | "kitchen"
+  | "inventory"
+  | "dashboard"
+  | "branches"
+  | "staff"
+  | "audit";
 
 const STORAGE_KEY = "cognivex.session";
 const BRANCH_STORAGE_KEY = "cognivex.branchId";
@@ -52,11 +61,12 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "branches", label: "Branches", icon: Building2 },
   { key: "staff", label: "Staff", icon: Users },
+  { key: "audit", label: "Audit", icon: ClipboardList },
 ];
 
 const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
-  ADMIN: ["branches", "staff"],
-  OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff"],
+  ADMIN: ["branches", "staff", "audit"],
+  OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier"],
   KITCHEN: ["kitchen"],
@@ -338,6 +348,9 @@ function OperationsApp() {
             ) : null}
             {view === "staff" && visibleNavItems.some((item) => item.key === "staff") ? (
               <StaffManagementView context={context} token={token} branches={branchOptions} />
+            ) : null}
+            {view === "audit" && visibleNavItems.some((item) => item.key === "audit") ? (
+              <AuditLogView context={context} token={token} branches={branchOptions} />
             ) : null}
           </>
         ) : null}

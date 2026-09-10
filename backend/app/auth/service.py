@@ -7,6 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.audit.models import AuditLog
 from app.auth.models import PasswordResetToken, Role, User
 from app.auth.schemas import StaffInviteCreate, UserCreate, UserUpdate
 from app.core.security import get_password_hash, verify_password
@@ -41,7 +42,26 @@ def as_aware_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def create_user(db: Session, user_in: UserCreate) -> User:
+def user_audit_values(user: User) -> dict:
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "role_name": user.role.name if user.role else None,
+        "restaurant_id": str(user.restaurant_id) if user.restaurant_id else None,
+        "branch_ids": [str(branch.id) for branch in user.branches],
+        "is_active": user.is_active,
+    }
+
+
+def create_user(
+    db: Session,
+    user_in: UserCreate,
+    *,
+    created_by: UUID | None = None,
+    audit_action: str = "STAFF_CREATED",
+) -> User:
     """Create a new user with a hashed password.
 
     Raises ValueError if the email is already registered or the role is invalid.
@@ -75,6 +95,19 @@ def create_user(db: Session, user_in: UserCreate) -> User:
     )
     user.branches = branches
     db.add(user)
+    db.flush()
+    if created_by is not None and user.restaurant_id is not None:
+        db.add(
+            AuditLog(
+                restaurant_id=user.restaurant_id,
+                user_id=created_by,
+                action=audit_action,
+                entity_type="user",
+                entity_id=user.id,
+                old_values=None,
+                new_values=user_audit_values(user),
+            )
+        )
     db.commit()
     db.refresh(user)
     return user
@@ -97,6 +130,8 @@ def create_user_invite(
             restaurant_id=user_in.restaurant_id,
             branch_ids=user_in.branch_ids,
         ),
+        created_by=created_by,
+        audit_action="STAFF_INVITED",
     )
     reset_token, raw_token = create_password_setup_token(
         db,
@@ -129,6 +164,23 @@ def create_password_setup_token(
         created_by=created_by,
     )
     db.add(reset_token)
+    if created_by is not None and user.restaurant_id is not None:
+        db.add(
+            AuditLog(
+                restaurant_id=user.restaurant_id,
+                user_id=created_by,
+                action="PASSWORD_SETUP_LINK_CREATED",
+                entity_type="user",
+                entity_id=user.id,
+                old_values=None,
+                new_values={
+                    "user_id": str(user.id),
+                    "email": user.email,
+                    "purpose": purpose,
+                    "expires_at": reset_token.expires_at.isoformat(),
+                },
+            )
+        )
     db.commit()
     db.refresh(reset_token)
     return reset_token, raw_token
@@ -205,8 +257,15 @@ def count_active_restaurant_owners(
     return query.count()
 
 
-def update_user(db: Session, user: User, user_in: UserUpdate) -> User:
+def update_user(
+    db: Session,
+    user: User,
+    user_in: UserUpdate,
+    *,
+    changed_by: UUID | None = None,
+) -> User:
     changes = user_in.model_dump(exclude_unset=True)
+    old_values = user_audit_values(user)
 
     if "role_name" in changes and user_in.role_name is not None:
         role = validate_role(db, user_in.role_name)
@@ -225,6 +284,19 @@ def update_user(db: Session, user: User, user_in: UserUpdate) -> User:
 
     if "branch_ids" in changes and user_in.branch_ids is not None:
         user.branches = validate_branches(db, user.restaurant_id, user_in.branch_ids)
+
+    if changes and changed_by is not None and user.restaurant_id is not None:
+        db.add(
+            AuditLog(
+                restaurant_id=user.restaurant_id,
+                user_id=changed_by,
+                action="STAFF_UPDATED",
+                entity_type="user",
+                entity_id=user.id,
+                old_values=old_values,
+                new_values=user_audit_values(user),
+            )
+        )
 
     db.commit()
     db.refresh(user)

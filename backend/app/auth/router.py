@@ -161,7 +161,7 @@ def create_user(
         if user_in.restaurant_id is not None:
             ensure_restaurant_access(current_user, user_in.restaurant_id)
     try:
-        user = service.create_user(db, user_in)
+        user = service.create_user(db, user_in, created_by=current_user.id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -263,7 +263,7 @@ def update_user(
 
     ensure_owner_safety(db, user, user_in)
     try:
-        updated_user = service.update_user(db, user, user_in)
+        updated_user = service.update_user(db, user, user_in, changed_by=current_user.id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

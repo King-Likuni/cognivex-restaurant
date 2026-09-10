@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.audit.models import AuditLog
 from app.auth.models import User
 from app.tenants.models import Branch, Restaurant, RestaurantSettings
 from app.tenants.schemas import (
@@ -78,7 +79,12 @@ def list_restaurants(db: Session) -> list[Restaurant]:
     return db.query(Restaurant).filter(Restaurant.is_active.is_(True)).all()
 
 
-def create_branch(db: Session, restaurant_id: UUID, data: BranchCreate) -> Branch:
+def create_branch(
+    db: Session,
+    restaurant_id: UUID,
+    data: BranchCreate,
+    created_by: User | None = None,
+) -> Branch:
     """Create a new branch under the given restaurant."""
     preferred_code = data.code or make_code_from_name(data.name, length=3)
     branch = Branch(
@@ -88,6 +94,25 @@ def create_branch(db: Session, restaurant_id: UUID, data: BranchCreate) -> Branc
         location=data.location,
     )
     db.add(branch)
+    db.flush()
+    if created_by is not None:
+        db.add(
+            AuditLog(
+                restaurant_id=restaurant_id,
+                user_id=created_by.id,
+                action="BRANCH_CREATED",
+                entity_type="branch",
+                entity_id=branch.id,
+                old_values=None,
+                new_values={
+                    "branch_id": str(branch.id),
+                    "code": branch.code,
+                    "name": branch.name,
+                    "location": branch.location,
+                    "is_active": branch.is_active,
+                },
+            )
+        )
     db.commit()
     db.refresh(branch)
     return branch
@@ -152,12 +177,20 @@ def update_branch(
     restaurant_id: UUID,
     branch_id: UUID,
     data: BranchUpdate,
+    changed_by: User | None = None,
 ) -> Branch | None:
     branch = get_branch(db, restaurant_id, branch_id)
     if not branch:
         return None
 
     changes = data.model_dump(exclude_unset=True)
+    old_values = {
+        "branch_id": str(branch.id),
+        "code": branch.code,
+        "name": branch.name,
+        "location": branch.location,
+        "is_active": branch.is_active,
+    }
 
     if "code" in changes and data.code is not None:
         candidate_code = normalize_code(data.code)
@@ -188,6 +221,25 @@ def update_branch(
             if remaining_active_branches == 0:
                 raise ValueError("At least one active branch is required")
         branch.is_active = data.is_active
+
+    if changes and changed_by is not None:
+        db.add(
+            AuditLog(
+                restaurant_id=restaurant_id,
+                user_id=changed_by.id,
+                action="BRANCH_UPDATED",
+                entity_type="branch",
+                entity_id=branch.id,
+                old_values=old_values,
+                new_values={
+                    "branch_id": str(branch.id),
+                    "code": branch.code,
+                    "name": branch.name,
+                    "location": branch.location,
+                    "is_active": branch.is_active,
+                },
+            )
+        )
 
     db.commit()
     db.refresh(branch)

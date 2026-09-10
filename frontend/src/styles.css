@@ -321,6 +321,7 @@ button:disabled {
 .event-list,
 .branch-admin-list,
 .staff-list,
+.audit-list,
 .customer-menu-stack,
 .customer-menu-list {
   display: grid;
@@ -515,6 +516,62 @@ button:disabled {
 
 .password-setup-complete a {
   text-decoration: none;
+}
+
+.audit-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.audit-row {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.audit-row-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.audit-row-header div {
+  display: grid;
+  min-width: 0;
+}
+
+.audit-row-header span:not(.status-pill),
+.audit-change-grid span {
+  color: #667286;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.audit-change-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.audit-change-grid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e0e5ec;
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 10px;
+}
+
+.audit-change-grid p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #263244;
+  font-size: 13px;
 }
 
 .customer-link-row {
@@ -834,6 +891,9 @@ button:disabled {
   .button-row,
   .compact-form,
   .invite-link-box,
+  .audit-filter-grid,
+  .audit-row-header,
+  .audit-change-grid,
   .branch-admin-grid,
   .staff-edit-grid {
     align-items: stretch;

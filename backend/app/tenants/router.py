@@ -96,7 +96,7 @@ def create_branch(
     restaurant = service.get_restaurant(db, restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant not found")
-    return service.create_branch(db, restaurant_id, data)
+    return service.create_branch(db, restaurant_id, data, created_by=current_user)
 
 
 @router.get(
@@ -138,7 +138,7 @@ def update_branch(
     """Update branch details or active status. Owners and platform admins only."""
     require_branch_admin(restaurant_id, current_user)
     try:
-        branch = service.update_branch(db, restaurant_id, branch_id, data)
+        branch = service.update_branch(db, restaurant_id, branch_id, data, changed_by=current_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not branch:

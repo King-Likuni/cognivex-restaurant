@@ -11,12 +11,8 @@ type Props = {
   token: string;
 };
 
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function DashboardView({ context, token }: Props) {
-  const [businessDate, setBusinessDate] = useState(todayIsoDate());
+  const [businessDate, setBusinessDate] = useState("");
   const [report, setReport] = useState<DailySalesReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +30,9 @@ export function DashboardView({ context, token }: Props) {
         },
       );
       setReport(nextReport);
+      if (!businessDate) {
+        setBusinessDate(nextReport.business_date);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load report");
     }
