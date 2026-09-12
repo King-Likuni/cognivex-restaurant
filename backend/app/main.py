@@ -8,6 +8,7 @@ from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.observability import configure_logging, request_logging_middleware
 from app.inventory.router import router as inventory_router
 from app.kitchen.router import router as kitchen_router
 from app.menu.router import router as menu_router
@@ -19,11 +20,15 @@ from app.realtime.router import router as realtime_router
 from app.reports.router import router as reports_router
 from app.tenants.router import router as tenants_router
 
+configure_logging(settings.LOG_LEVEL)
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
 )
+
+app.middleware("http")(request_logging_middleware)
 
 app.add_middleware(
     CORSMiddleware,

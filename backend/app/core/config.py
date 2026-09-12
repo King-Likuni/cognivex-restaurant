@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     VERSION: str = "0.1.0"
     ENVIRONMENT: Literal["development", "test", "staging", "production"] = "development"
     API_V1_STR: str = "/api/v1"
+    LOG_LEVEL: str = "INFO"
 
     # Postgres
     POSTGRES_SERVER: str = "127.0.0.1"

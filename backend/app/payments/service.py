@@ -27,6 +27,37 @@ def normalize_provider(provider: str) -> str:
     return provider.strip().upper()
 
 
+def record_mobile_transfer_proof_rejection(
+    db: Session,
+    restaurant_id: UUID,
+    order: Order,
+    confirmed_by: User,
+    reason: str,
+    amount_received: Decimal,
+) -> None:
+    payment = order.payment
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant_id,
+            user_id=confirmed_by.id,
+            action="MOBILE_TRANSFER_PROOF_REJECTED",
+            entity_type="order",
+            entity_id=order.id,
+            old_values={
+                "payment_status": order.payment_status,
+                "order_status": order.order_status,
+            },
+            new_values={
+                "provider": payment.provider if payment else None,
+                "reason": reason,
+                "amount_received": str(amount_received),
+                "amount_paid": str(order.total),
+            },
+        )
+    )
+    db.commit()
+
+
 def initiate_payment(
     db: Session,
     restaurant_id: UUID,
@@ -328,22 +359,70 @@ def confirm_mobile_transfer_payment(
     if order is None:
         raise ValueError("Order not found")
     if order.payment is None:
+        record_mobile_transfer_proof_rejection(
+            db,
+            restaurant_id,
+            order,
+            confirmed_by,
+            "payment_not_initiated",
+            amount_received,
+        )
         raise ValueError("Remote payment has not been initiated for this order")
 
     payment = order.payment
     if payment.provider not in REMOTE_PAYMENT_PROVIDERS:
+        record_mobile_transfer_proof_rejection(
+            db,
+            restaurant_id,
+            order,
+            confirmed_by,
+            "provider_not_mobile_transfer",
+            amount_received,
+        )
         raise ValueError("Only mobile transfer payments can be manually confirmed here")
     if order.order_status != OrderStatus.READY.value:
+        record_mobile_transfer_proof_rejection(
+            db,
+            restaurant_id,
+            order,
+            confirmed_by,
+            "order_not_ready",
+            amount_received,
+        )
         raise ValueError(
             "Mobile transfer can only be confirmed when the order is ready for collection"
         )
     if amount_received < Decimal(order.total):
+        record_mobile_transfer_proof_rejection(
+            db,
+            restaurant_id,
+            order,
+            confirmed_by,
+            "amount_less_than_total",
+            amount_received,
+        )
         raise ValueError("Amount received is less than order total")
 
     normalized_payment_reference = payment_reference_used.strip().upper()
     if normalized_payment_reference != order.payment_reference.upper():
+        record_mobile_transfer_proof_rejection(
+            db,
+            restaurant_id,
+            order,
+            confirmed_by,
+            "reference_mismatch",
+            amount_received,
+        )
         raise ValueError("Payment reference does not match this order")
     if has_confirmed_mobile_transfer_proof(db, payment, order.payment_reference):
+        record_mobile_transfer_proof_rejection(
+            db,
+            restaurant_id,
+            order,
+            confirmed_by,
+            "proof_already_confirmed",
+            amount_received,
+        )
         raise ValueError("Mobile transfer proof has already been confirmed")
 
     previous_payment_status = payment.status

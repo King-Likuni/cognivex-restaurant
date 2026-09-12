@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.audit.models import AuditLog
 from app.core.config import settings
 from app.core.webhooks import build_hmac_signature
 from app.orders.enums import OrderStatus, PaymentStatus
@@ -302,6 +303,7 @@ def test_mobile_transfer_collection_requires_manual_reference_proof(
 
 def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
     api_client: TestClient,
+    db_session: Session,
     seeded_restaurant: dict[str, object],
 ):
     restaurant_id = str(seeded_restaurant["restaurant"].id)
@@ -337,6 +339,18 @@ def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
     )
     assert confirm_response.status_code == 400
     assert confirm_response.json()["detail"] == "Payment reference does not match this order"
+
+    rejection = (
+        db_session.query(AuditLog)
+        .filter(
+            AuditLog.entity_id == UUID(order["id"]),
+            AuditLog.action == "MOBILE_TRANSFER_PROOF_REJECTED",
+        )
+        .one()
+    )
+    assert rejection.user_id == seeded_restaurant["owner"].id
+    assert rejection.new_values["reason"] == "reference_mismatch"
+    assert "WRONG-REFERENCE" not in str(rejection.new_values)
 
 
 def test_payment_webhook_rejects_invalid_signature(
