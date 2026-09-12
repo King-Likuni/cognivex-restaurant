@@ -203,6 +203,9 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await expect(page.getByText("Revenue counts paid collected orders only.")).toBeVisible();
   await expect(page.getByTestId("stat-collected")).toContainText(String(expectedCollectedOrders));
   await expect(page.getByTestId("stat-revenue")).toContainText(`BWP ${expectedRevenue}`);
+  await expect(page.getByRole("heading", { name: "Sold Products" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cashier Activity" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CSV" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Audit" }).click();
   await expect(page.getByTestId("audit-log-CASH_PAYMENT_CONFIRMED").first()).toBeVisible();

@@ -169,6 +169,20 @@ def test_cashier_order_to_collected_daily_sale(
         }
     ]
     assert report["sales_by_payment"] == [{"provider": "CASH", "payments": 1, "revenue": "110.00"}]
+    assert report["sales_by_channel"] == [{"channel": "CASHIER", "orders": 1, "revenue": "110.00"}]
+    assert report["hourly_sales"][0]["orders"] == 1
+    assert report["hourly_sales"][0]["revenue"] == "110.00"
+    assert report["cashier_activity"] == [
+        {
+            "user_id": str(seeded_restaurant["owner"].id),
+            "name": "Restaurant Owner",
+            "email": "owner@example.com",
+            "orders_created": 1,
+            "payments_confirmed": 1,
+            "orders_collected": 1,
+            "revenue_collected": "110.00",
+        }
+    ]
 
 
 def test_uncollected_order_is_not_counted_as_revenue(

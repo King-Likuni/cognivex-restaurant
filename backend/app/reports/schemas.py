@@ -20,6 +20,28 @@ class PaymentMethodSummary(BaseModel):
     revenue: Decimal
 
 
+class ChannelSummary(BaseModel):
+    channel: str
+    orders: int
+    revenue: Decimal
+
+
+class HourlySalesSummary(BaseModel):
+    hour: int
+    orders: int
+    revenue: Decimal
+
+
+class CashierActivitySummary(BaseModel):
+    user_id: UUID | None
+    name: str
+    email: str | None
+    orders_created: int
+    payments_confirmed: int
+    orders_collected: int
+    revenue_collected: Decimal
+
+
 class DailySalesReport(BaseModel):
     restaurant_id: UUID
     branch_id: UUID | None
@@ -33,3 +55,6 @@ class DailySalesReport(BaseModel):
     average_order_value: Decimal
     top_items: list[TopMenuItemSummary]
     sales_by_payment: list[PaymentMethodSummary]
+    sales_by_channel: list[ChannelSummary]
+    hourly_sales: list[HourlySalesSummary]
+    cashier_activity: list[CashierActivitySummary]

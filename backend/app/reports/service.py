@@ -1,21 +1,36 @@
 """Reporting service layer."""
 
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
+from app.audit.models import AuditLog
+from app.auth.models import User
 from app.menu.models import MenuItem
 from app.orders.enums import OrderStatus, PaymentStatus
-from app.orders.models import Order, OrderItem
+from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.payments.models import Payment
-from app.reports.schemas import DailySalesReport, PaymentMethodSummary, TopMenuItemSummary
+from app.reports.schemas import (
+    CashierActivitySummary,
+    ChannelSummary,
+    DailySalesReport,
+    HourlySalesSummary,
+    PaymentMethodSummary,
+    TopMenuItemSummary,
+)
 
 
 def _money(value: Decimal | int | None) -> Decimal:
     return Decimal(value or 0).quantize(Decimal("0.01"))
+
+
+def _user_name(first_name: str | None, last_name: str | None, email: str | None) -> str:
+    full_name = " ".join(part for part in [first_name, last_name] if part)
+    return full_name or email or "System"
 
 
 def get_daily_sales_report(
@@ -114,6 +129,184 @@ def get_daily_sales_report(
         for row in payment_query.group_by(Payment.provider).order_by(Payment.provider).all()
     ]
 
+    collected_paid_filter = and_(
+        Order.payment_status == PaymentStatus.PAID.value,
+        Order.order_status == OrderStatus.COLLECTED.value,
+    )
+    channel_rows = db.query(
+        Order.channel,
+        func.count(Order.id).label("orders"),
+        func.coalesce(
+            func.sum(case((collected_paid_filter, Order.total), else_=0)),
+            0,
+        ).label("revenue"),
+    ).filter(
+        Order.restaurant_id == restaurant_id,
+        Order.business_date == business_date,
+    )
+    if branch_id is not None:
+        channel_rows = channel_rows.filter(Order.branch_id == branch_id)
+    sales_by_channel = [
+        ChannelSummary(
+            channel=row.channel,
+            orders=int(row.orders or 0),
+            revenue=_money(row.revenue),
+        )
+        for row in channel_rows.group_by(Order.channel).order_by(Order.channel).all()
+    ]
+
+    hour_bucket = func.extract("hour", Order.collected_at)
+    hourly_query = db.query(
+        hour_bucket.label("hour"),
+        func.count(Order.id).label("orders"),
+        func.coalesce(func.sum(Order.total), 0).label("revenue"),
+    ).filter(
+        Order.restaurant_id == restaurant_id,
+        Order.business_date == business_date,
+        Order.payment_status == PaymentStatus.PAID.value,
+        Order.order_status == OrderStatus.COLLECTED.value,
+        Order.collected_at.isnot(None),
+    )
+    if branch_id is not None:
+        hourly_query = hourly_query.filter(Order.branch_id == branch_id)
+    hourly_sales = [
+        HourlySalesSummary(
+            hour=int(row.hour or 0),
+            orders=int(row.orders or 0),
+            revenue=_money(row.revenue),
+        )
+        for row in hourly_query.group_by(hour_bucket).order_by(hour_bucket).all()
+    ]
+
+    activity: dict[UUID | None, dict[str, object]] = defaultdict(
+        lambda: {
+            "name": "System",
+            "email": None,
+            "orders_created": 0,
+            "payments_confirmed": 0,
+            "orders_collected": 0,
+            "revenue_collected": Decimal("0.00"),
+        }
+    )
+
+    def ensure_activity_row(
+        user_id: UUID | None,
+        first_name: str | None,
+        last_name: str | None,
+        email: str | None,
+    ) -> dict[str, object]:
+        row = activity[user_id]
+        row["name"] = _user_name(first_name, last_name, email)
+        row["email"] = email
+        return row
+
+    created_query = (
+        db.query(
+            Order.created_by.label("user_id"),
+            User.first_name,
+            User.last_name,
+            User.email,
+            func.count(Order.id).label("orders_created"),
+        )
+        .outerjoin(User, User.id == Order.created_by)
+        .filter(Order.restaurant_id == restaurant_id, Order.business_date == business_date)
+    )
+    if branch_id is not None:
+        created_query = created_query.filter(Order.branch_id == branch_id)
+    for row in (
+        created_query.group_by(Order.created_by, User.first_name, User.last_name, User.email)
+        .order_by(User.email)
+        .all()
+    ):
+        activity_row = ensure_activity_row(row.user_id, row.first_name, row.last_name, row.email)
+        activity_row["orders_created"] = int(row.orders_created or 0)
+
+    payment_confirmed_query = (
+        db.query(
+            AuditLog.user_id,
+            User.first_name,
+            User.last_name,
+            User.email,
+            func.count(AuditLog.id).label("payments_confirmed"),
+        )
+        .join(Order, and_(AuditLog.entity_type == "order", AuditLog.entity_id == Order.id))
+        .outerjoin(User, User.id == AuditLog.user_id)
+        .filter(
+            AuditLog.restaurant_id == restaurant_id,
+            AuditLog.action.in_(["CASH_PAYMENT_CONFIRMED", "MOBILE_TRANSFER_PAYMENT_CONFIRMED"]),
+            Order.business_date == business_date,
+        )
+    )
+    if branch_id is not None:
+        payment_confirmed_query = payment_confirmed_query.filter(Order.branch_id == branch_id)
+    for row in (
+        payment_confirmed_query.group_by(
+            AuditLog.user_id,
+            User.first_name,
+            User.last_name,
+            User.email,
+        )
+        .order_by(User.email)
+        .all()
+    ):
+        activity_row = ensure_activity_row(row.user_id, row.first_name, row.last_name, row.email)
+        activity_row["payments_confirmed"] = int(row.payments_confirmed or 0)
+
+    collected_query = (
+        db.query(
+            OrderStatusHistory.changed_by.label("user_id"),
+            User.first_name,
+            User.last_name,
+            User.email,
+            func.count(Order.id).label("orders_collected"),
+            func.coalesce(func.sum(Order.total), 0).label("revenue_collected"),
+        )
+        .join(Order, Order.id == OrderStatusHistory.order_id)
+        .outerjoin(User, User.id == OrderStatusHistory.changed_by)
+        .filter(
+            Order.restaurant_id == restaurant_id,
+            Order.business_date == business_date,
+            Order.payment_status == PaymentStatus.PAID.value,
+            Order.order_status == OrderStatus.COLLECTED.value,
+            OrderStatusHistory.new_status == OrderStatus.COLLECTED.value,
+        )
+    )
+    if branch_id is not None:
+        collected_query = collected_query.filter(Order.branch_id == branch_id)
+    for row in (
+        collected_query.group_by(
+            OrderStatusHistory.changed_by,
+            User.first_name,
+            User.last_name,
+            User.email,
+        )
+        .order_by(User.email)
+        .all()
+    ):
+        activity_row = ensure_activity_row(row.user_id, row.first_name, row.last_name, row.email)
+        activity_row["orders_collected"] = int(row.orders_collected or 0)
+        activity_row["revenue_collected"] = _money(row.revenue_collected)
+
+    cashier_activity = [
+        CashierActivitySummary(
+            user_id=user_id,
+            name=str(row["name"]),
+            email=row["email"] if isinstance(row["email"], str) else None,
+            orders_created=int(row["orders_created"]),
+            payments_confirmed=int(row["payments_confirmed"]),
+            orders_collected=int(row["orders_collected"]),
+            revenue_collected=_money(row["revenue_collected"]),
+        )
+        for user_id, row in activity.items()
+    ]
+    cashier_activity.sort(
+        key=lambda row: (
+            -row.revenue_collected,
+            -row.orders_collected,
+            row.name.lower(),
+        )
+    )
+
     return DailySalesReport(
         restaurant_id=restaurant_id,
         branch_id=branch_id,
@@ -127,4 +320,7 @@ def get_daily_sales_report(
         average_order_value=average_order_value,
         top_items=top_items,
         sales_by_payment=sales_by_payment,
+        sales_by_channel=sales_by_channel,
+        hourly_sales=hourly_sales,
+        cashier_activity=cashier_activity,
     )

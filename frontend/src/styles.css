@@ -349,6 +349,98 @@ button:disabled {
   padding: 12px;
 }
 
+.report-section {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.report-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.report-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e0e5ec;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.report-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report-row-header span {
+  display: block;
+  color: #667286;
+}
+
+.bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e9edf3;
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #176b49;
+}
+
+.hour-chart {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(42px, 1fr));
+  gap: 10px;
+  min-height: 180px;
+  align-items: end;
+}
+
+.hour-bar {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+  min-height: 160px;
+  text-align: center;
+}
+
+.hour-bar span {
+  align-self: end;
+  min-height: 8px;
+  border-radius: 8px 8px 2px 2px;
+  background: #24527a;
+}
+
+.hour-bar strong {
+  font-size: 12px;
+  color: #526071;
+}
+
+.cashier-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  text-align: right;
+}
+
+.cashier-metrics span {
+  color: #526071;
+  font-size: 12px;
+}
+
+.cashier-metrics strong {
+  flex-basis: 100%;
+}
+
 .cart-line {
   grid-template-columns: 1fr 90px 40px;
 }

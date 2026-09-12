@@ -191,6 +191,17 @@ export type DailySalesReport = {
   average_order_value: string;
   top_items: { menu_item_id: string; name: string; quantity: number; revenue: string }[];
   sales_by_payment: { provider: string; payments: number; revenue: string }[];
+  sales_by_channel: { channel: string; orders: number; revenue: string }[];
+  hourly_sales: { hour: number; orders: number; revenue: string }[];
+  cashier_activity: {
+    user_id: string | null;
+    name: string;
+    email: string | null;
+    orders_created: number;
+    payments_confirmed: number;
+    orders_collected: number;
+    revenue_collected: string;
+  }[];
 };
 
 export type AuditLog = {
