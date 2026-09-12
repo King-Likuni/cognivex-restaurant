@@ -108,6 +108,7 @@ export type Order = {
   currency: string;
   payment_status: string;
   payment_provider: string | null;
+  mobile_transfer_proof_confirmed: boolean;
   order_status: string;
   created_by: string | null;
   created_at: string | null;

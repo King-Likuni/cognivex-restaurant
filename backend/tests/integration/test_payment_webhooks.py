@@ -227,6 +227,79 @@ def test_mobile_transfer_payment_can_be_manually_confirmed(
     ]
 
 
+def test_mobile_transfer_collection_requires_manual_reference_proof(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    headers = login(api_client, "owner@example.com", "ownerpassword")
+    item = create_menu_item(api_client, restaurant_id, headers)
+    order = create_order(api_client, restaurant_id, branch_id, headers, item["id"])
+
+    initiate_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments",
+        headers=headers,
+        json={"provider": "ORANGE_MONEY", "customer_phone_number": "+26770000000"},
+    )
+    assert initiate_response.status_code == 201, initiate_response.text
+    payment = initiate_response.json()
+
+    body, signed_headers = signed_webhook_headers(
+        {
+            "provider_event_id": "om-event-proof-required",
+            "reference": payment["reference"],
+            "status": PaymentStatus.PAID.value,
+            "amount": "55.00",
+            "currency": "BWP",
+            "provider_transaction_id": "om-txn-proof-required",
+        }
+    )
+    webhook_response = api_client.post(
+        "/api/v1/webhooks/payments/ORANGE_MONEY",
+        content=body,
+        headers=signed_headers,
+    )
+    assert webhook_response.status_code == 200, webhook_response.text
+
+    start_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=headers,
+    )
+    assert start_response.status_code == 200, start_response.text
+    ready_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/ready",
+        headers=headers,
+    )
+    assert ready_response.status_code == 200, ready_response.text
+
+    collect_without_proof_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+        headers=headers,
+    )
+    assert collect_without_proof_response.status_code == 400
+    assert collect_without_proof_response.json()["detail"] == (
+        "Mobile transfer proof must be confirmed before collection"
+    )
+
+    confirm_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
+        headers=headers,
+        json={
+            "amount_received": "55.00",
+            "payment_reference_used": order["payment_reference"],
+        },
+    )
+    assert confirm_response.status_code == 201, confirm_response.text
+
+    collect_with_proof_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+        headers=headers,
+    )
+    assert collect_with_proof_response.status_code == 200, collect_with_proof_response.text
+    assert collect_with_proof_response.json()["order_status"] == OrderStatus.COLLECTED.value
+
+
 def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
     api_client: TestClient,
     seeded_restaurant: dict[str, object],

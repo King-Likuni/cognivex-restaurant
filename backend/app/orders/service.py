@@ -20,6 +20,11 @@ from app.orders.numbering import (
 )
 from app.orders.schemas import CashierOrderCreate, PublicCustomerOrderCreate
 from app.orders.state_machine import validate_order_transition
+from app.payments.models import Payment
+from app.payments.proof import (
+    has_confirmed_mobile_transfer_proof,
+    requires_mobile_transfer_proof,
+)
 from app.realtime.events import publish_order_event
 from app.tenants.models import Branch, Restaurant, RestaurantSettings
 
@@ -286,7 +291,7 @@ def get_order(
 ) -> Order | None:
     return (
         db.query(Order)
-        .options(selectinload(Order.payment))
+        .options(selectinload(Order.payment).selectinload(Payment.events))
         .filter(
             Order.id == order_id,
             Order.restaurant_id == restaurant_id,
@@ -306,7 +311,7 @@ def list_branch_orders(
 ) -> list[Order]:
     query = (
         db.query(Order)
-        .options(selectinload(Order.payment))
+        .options(selectinload(Order.payment).selectinload(Payment.events))
         .filter(
             Order.restaurant_id == restaurant_id,
             Order.branch_id == branch_id,
@@ -370,6 +375,12 @@ def collect_order(
         raise ValueError("Order not found")
     if order.payment_status != PaymentStatus.PAID.value:
         raise ValueError("Only paid orders can be collected")
+    if order.payment is None:
+        raise ValueError("Payment record is required before collection")
+    if requires_mobile_transfer_proof(order.payment) and not has_confirmed_mobile_transfer_proof(
+        db, order.payment, order.payment_reference
+    ):
+        raise ValueError("Mobile transfer proof must be confirmed before collection")
 
     from app.inventory.service import consume_order_stock
 

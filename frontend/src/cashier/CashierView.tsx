@@ -57,6 +57,14 @@ const CLOSED_ORDER_STATUSES = new Set([
 ]);
 
 function orderStatusLabel(order: Order) {
+  if (
+    order.order_status === "READY" &&
+    order.payment_status === "PAID" &&
+    isMobileTransferProvider(order.payment_provider) &&
+    !order.mobile_transfer_proof_confirmed
+  ) {
+    return "Ready, proof required";
+  }
   if (order.payment_status !== "PAID") {
     if (order.order_status === "READY") {
       return "Ready, awaiting payment";
@@ -76,6 +84,10 @@ function orderStatusLabel(order: Order) {
     return "In kitchen";
   }
   return order.order_status.replaceAll("_", " ");
+}
+
+function isMobileTransferProvider(provider: string | null) {
+  return provider === "ORANGE_MONEY" || provider === "PAY2CELL";
 }
 
 function cashierErrorMessage(caught: unknown, fallback: string) {
@@ -146,11 +158,21 @@ export function CashierView({ context, token }: Props) {
       setCustomerOrders(
         orders.filter(
           (order) =>
-            order.payment_status !== "PAID" && !CLOSED_ORDER_STATUSES.has(order.order_status),
+            !CLOSED_ORDER_STATUSES.has(order.order_status) &&
+            (order.payment_status !== "PAID" ||
+              (order.order_status === "READY" &&
+                isMobileTransferProvider(order.payment_provider) &&
+                !order.mobile_transfer_proof_confirmed)),
         ),
       );
       setReadyOrders(
-        orders.filter((order) => order.order_status === "READY" && order.payment_status === "PAID"),
+        orders.filter(
+          (order) =>
+            order.order_status === "READY" &&
+            order.payment_status === "PAID" &&
+            (!isMobileTransferProvider(order.payment_provider) ||
+              order.mobile_transfer_proof_confirmed),
+        ),
       );
       setUncollectedOrders(orders.filter((order) => order.order_status === "UNCOLLECTED"));
     } catch (caught) {

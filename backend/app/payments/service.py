@@ -12,6 +12,7 @@ from app.orders.enums import OrderStatus, PaymentStatus
 from app.orders.models import Order
 from app.orders.service import transition_order
 from app.payments.models import Payment, PaymentEvent
+from app.payments.proof import has_confirmed_mobile_transfer_proof
 from app.payments.providers import REMOTE_PAYMENT_PROVIDERS, PaymentRequest, get_payment_provider
 from app.realtime.events import publish_order_event
 
@@ -332,8 +333,6 @@ def confirm_mobile_transfer_payment(
     payment = order.payment
     if payment.provider not in REMOTE_PAYMENT_PROVIDERS:
         raise ValueError("Only mobile transfer payments can be manually confirmed here")
-    if payment.status == PaymentStatus.PAID.value:
-        raise ValueError("Order is already paid")
     if order.order_status != OrderStatus.READY.value:
         raise ValueError(
             "Mobile transfer can only be confirmed when the order is ready for collection"
@@ -344,11 +343,14 @@ def confirm_mobile_transfer_payment(
     normalized_payment_reference = payment_reference_used.strip().upper()
     if normalized_payment_reference != order.payment_reference.upper():
         raise ValueError("Payment reference does not match this order")
+    if has_confirmed_mobile_transfer_proof(db, payment, order.payment_reference):
+        raise ValueError("Mobile transfer proof has already been confirmed")
 
     previous_payment_status = payment.status
     previous_order_status = order.order_status
-    payment.status = PaymentStatus.PAID.value
-    payment.completed_at = datetime.now(UTC)
+    if payment.status != PaymentStatus.PAID.value:
+        payment.status = PaymentStatus.PAID.value
+        payment.completed_at = datetime.now(UTC)
     order.payment_status = PaymentStatus.PAID.value
 
     db.add(

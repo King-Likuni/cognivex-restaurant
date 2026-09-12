@@ -76,6 +76,24 @@ class Order(Base):
     def payment_provider(self) -> str | None:
         return self.payment.provider if self.payment else None
 
+    @property
+    def mobile_transfer_proof_confirmed(self) -> bool:
+        if self.payment is None:
+            return False
+
+        from app.payments.providers import REMOTE_PAYMENT_PROVIDERS
+
+        if self.payment.provider not in REMOTE_PAYMENT_PROVIDERS:
+            return False
+
+        expected_event_type = f"{self.payment.provider}_MANUAL_CONFIRMED"
+        expected_reference = self.payment_reference.upper()
+        return any(
+            event.event_type == expected_event_type
+            and event.provider_event_id == expected_reference
+            for event in self.payment.events
+        )
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"

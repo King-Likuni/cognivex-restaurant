@@ -54,6 +54,7 @@ class OrderResponse(BaseModel):
     currency: str
     payment_status: str
     payment_provider: str | None = None
+    mobile_transfer_proof_confirmed: bool = False
     order_status: str
     created_by: UUID | None
     created_at: datetime | None
