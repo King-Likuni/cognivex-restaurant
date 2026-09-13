@@ -299,6 +299,30 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return (await response.json()) as T;
 }
 
+export async function downloadApiFile(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const response = await fetch(buildUrl(path, options.params), {
+    method: options.method ?? "GET",
+    headers: {
+      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      const payload = (await response.json()) as { detail?: unknown };
+      if (typeof payload.detail === "string") {
+        message = payload.detail;
+      }
+    } catch {
+      // Keep the HTTP status message when the body is not JSON.
+    }
+    throw new Error(message);
+  }
+
+  return response.blob();
+}
+
 export async function login(email: string, password: string) {
   const body = new URLSearchParams();
   body.set("username", email);

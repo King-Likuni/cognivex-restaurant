@@ -3,76 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AppContext } from "../App";
 import { EmptyState, Field, Notice, Panel, Stat } from "../components/ui";
-import { apiRequest, type DailySalesReport } from "../services/api";
+import { apiRequest, downloadApiFile, type DailySalesReport } from "../services/api";
 import { formatMoney } from "../services/format";
 
 type Props = {
   context: AppContext;
   token: string;
 };
-
-function csvValue(value: string | number | null) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function csvRow(values: (string | number | null)[]) {
-  return values.map(csvValue).join(",");
-}
-
-function reportCsv(report: DailySalesReport, branchName: string) {
-  const rows = [
-    csvRow(["Cognivex Owner Report"]),
-    csvRow(["Business date", report.business_date]),
-    csvRow(["Branch", branchName]),
-    "",
-    csvRow(["Summary"]),
-    csvRow(["Revenue", report.revenue]),
-    csvRow(["Orders", report.orders]),
-    csvRow(["Collected", report.collected_orders]),
-    csvRow(["Ready", report.ready_orders]),
-    csvRow(["Uncollected", report.uncollected_orders]),
-    csvRow(["Cancelled", report.cancelled_orders]),
-    csvRow(["Average order value", report.average_order_value]),
-    "",
-    csvRow(["Sold products"]),
-    csvRow(["Product", "Quantity", "Revenue"]),
-    ...report.top_items.map((item) => csvRow([item.name, item.quantity, item.revenue])),
-    "",
-    csvRow(["Payment methods"]),
-    csvRow(["Provider", "Payments", "Revenue"]),
-    ...report.sales_by_payment.map((payment) =>
-      csvRow([payment.provider, payment.payments, payment.revenue]),
-    ),
-    "",
-    csvRow(["Channels"]),
-    csvRow(["Channel", "Orders", "Revenue"]),
-    ...report.sales_by_channel.map((channel) =>
-      csvRow([channel.channel, channel.orders, channel.revenue]),
-    ),
-    "",
-    csvRow(["Cashier activity"]),
-    csvRow([
-      "Name",
-      "Email",
-      "Orders created",
-      "Payments confirmed",
-      "Orders collected",
-      "Revenue collected",
-    ]),
-    ...report.cashier_activity.map((cashier) =>
-      csvRow([
-        cashier.name,
-        cashier.email,
-        cashier.orders_created,
-        cashier.payments_confirmed,
-        cashier.orders_collected,
-        cashier.revenue_collected,
-      ]),
-    ),
-  ];
-  return rows.join("\n");
-}
 
 export function DashboardView({ context, token }: Props) {
   const [businessDate, setBusinessDate] = useState("");
@@ -125,19 +62,52 @@ export function DashboardView({ context, token }: Props) {
     [report],
   );
 
-  function downloadReport() {
-    if (!report) {
-      return;
+  async function downloadExport(path: string, filename: string, includeDate = true) {
+    setError(null);
+    try {
+      const blob = await downloadApiFile(path, {
+        token,
+        params: {
+          business_date: includeDate ? businessDate : undefined,
+          branch_id: context.branch.id,
+          date_from: includeDate ? businessDate : undefined,
+          date_to: includeDate ? businessDate : undefined,
+        },
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not download export");
     }
-    const blob = new Blob([reportCsv(report, context.branch.name)], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `cognivex-owner-report-${report.business_date}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+  }
+
+  async function downloadReport() {
+    setError(null);
+    try {
+      const exportDate = businessDate || report?.business_date || "today";
+      const blob = await downloadApiFile(
+        `/api/v1/restaurants/${context.restaurant.id}/reports/daily-sales.csv`,
+        {
+          token,
+          params: {
+            business_date: businessDate,
+            branch_id: context.branch.id,
+          },
+        },
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `cognivex-owner-report-${exportDate}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not download report");
+    }
   }
 
   return (
@@ -153,7 +123,7 @@ export function DashboardView({ context, token }: Props) {
             <button
               className="secondary-action"
               type="button"
-              onClick={downloadReport}
+              onClick={() => void downloadReport()}
               disabled={!report}
             >
               <Download size={17} />
@@ -311,6 +281,67 @@ export function DashboardView({ context, token }: Props) {
                   </div>
                 ))}
                 {!report.cashier_activity.length ? <EmptyState>No cashier activity yet</EmptyState> : null}
+              </div>
+            </section>
+            <section className="report-section">
+              <h3>
+                <Download size={18} />
+                Data Exports
+              </h3>
+              <div className="export-grid">
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() =>
+                    void downloadExport(
+                      `/api/v1/restaurants/${context.restaurant.id}/reports/exports/orders.csv`,
+                      `cognivex-orders-${businessDate || report.business_date}.csv`,
+                    )
+                  }
+                >
+                  <Download size={17} />
+                  Orders
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() =>
+                    void downloadExport(
+                      `/api/v1/restaurants/${context.restaurant.id}/reports/exports/payments.csv`,
+                      `cognivex-payments-${businessDate || report.business_date}.csv`,
+                    )
+                  }
+                >
+                  <Download size={17} />
+                  Payments
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() =>
+                    void downloadExport(
+                      `/api/v1/restaurants/${context.restaurant.id}/reports/exports/audit-logs.csv`,
+                      `cognivex-audit-logs-${businessDate || report.business_date}.csv`,
+                    )
+                  }
+                >
+                  <Download size={17} />
+                  Audit Logs
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() =>
+                    void downloadExport(
+                      `/api/v1/restaurants/${context.restaurant.id}/reports/exports/inventory-balances.csv`,
+                      `cognivex-inventory-balances-${businessDate || report.business_date}.csv`,
+                      false,
+                    )
+                  }
+                >
+                  <Download size={17} />
+                  Inventory
+                </button>
               </div>
             </section>
           </>

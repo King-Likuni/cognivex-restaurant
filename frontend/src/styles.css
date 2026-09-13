@@ -425,6 +425,12 @@ button:disabled {
   color: #526071;
 }
 
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
 .cashier-metrics {
   display: flex;
   flex-wrap: wrap;

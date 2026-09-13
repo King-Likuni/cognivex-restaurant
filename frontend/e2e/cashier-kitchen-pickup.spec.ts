@@ -206,8 +206,11 @@ test("cashier, kitchen, pickup, and dashboard journey", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Sold Products" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cashier Activity" })).toBeVisible();
   await expect(page.getByRole("button", { name: "CSV" })).toBeEnabled();
+  await expect(page.getByRole("heading", { name: "Data Exports" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Orders" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Payments" })).toBeEnabled();
 
-  await page.getByRole("button", { name: "Audit" }).click();
+  await page.getByRole("button", { name: "Audit", exact: true }).click();
   await expect(page.getByTestId("audit-log-CASH_PAYMENT_CONFIRMED").first()).toBeVisible();
   await expect(page.getByTestId("audit-log-ORDER_COLLECTED").first()).toBeVisible();
 

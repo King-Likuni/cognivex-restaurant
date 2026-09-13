@@ -184,6 +184,54 @@ def test_cashier_order_to_collected_daily_sale(
         }
     ]
 
+    daily_csv_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales.csv",
+        headers=owner_headers,
+        params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+    )
+    assert daily_csv_response.status_code == 200, daily_csv_response.text
+    assert "text/csv" in daily_csv_response.headers["content-type"]
+    assert "sold_products" in daily_csv_response.text
+    assert "Chicken and Chips" in daily_csv_response.text
+
+    orders_csv_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/exports/orders.csv",
+        headers=owner_headers,
+        params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+    )
+    assert orders_csv_response.status_code == 200, orders_csv_response.text
+    assert order["display_number"] in orders_csv_response.text
+    assert "COLLECTED" in orders_csv_response.text
+
+    payments_csv_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/exports/payments.csv",
+        headers=owner_headers,
+        params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+    )
+    assert payments_csv_response.status_code == 200, payments_csv_response.text
+    assert order["payment_reference"] in payments_csv_response.text
+    assert "CASH" in payments_csv_response.text
+
+    audit_csv_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/exports/audit-logs.csv",
+        headers=owner_headers,
+        params={
+            "date_from": date.today().isoformat(),
+            "date_to": date.today().isoformat(),
+            "branch_id": branch_id,
+        },
+    )
+    assert audit_csv_response.status_code == 200, audit_csv_response.text
+    assert "ORDER_COLLECTED" in audit_csv_response.text
+
+    inventory_csv_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/exports/inventory-balances.csv",
+        headers=owner_headers,
+        params={"branch_id": branch_id},
+    )
+    assert inventory_csv_response.status_code == 200, inventory_csv_response.text
+    assert "ingredient_id,name,unit,quantity_on_hand" in inventory_csv_response.text
+
 
 def test_uncollected_order_is_not_counted_as_revenue(
     api_client: TestClient,

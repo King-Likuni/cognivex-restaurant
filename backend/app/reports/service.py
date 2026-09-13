@@ -1,8 +1,11 @@
 """Reporting service layer."""
 
+import csv
+import json
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+from io import StringIO
 from uuid import UUID
 
 from sqlalchemy import and_, case, func
@@ -10,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.audit.models import AuditLog
 from app.auth.models import User
+from app.inventory import service as inventory_service
 from app.menu.models import MenuItem
 from app.orders.enums import OrderStatus, PaymentStatus
 from app.orders.models import Order, OrderItem, OrderStatusHistory
@@ -31,6 +35,18 @@ def _money(value: Decimal | int | None) -> Decimal:
 def _user_name(first_name: str | None, last_name: str | None, email: str | None) -> str:
     full_name = " ".join(part for part in [first_name, last_name] if part)
     return full_name or email or "System"
+
+
+def _csv_text(headers: list[str], rows: list[list[object]]) -> str:
+    output = StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return output.getvalue()
+
+
+def _json_cell(value: object) -> str:
+    return json.dumps(value, default=str, sort_keys=True, separators=(",", ":"))
 
 
 def get_daily_sales_report(
@@ -324,3 +340,229 @@ def get_daily_sales_report(
         hourly_sales=hourly_sales,
         cashier_activity=cashier_activity,
     )
+
+
+def export_daily_sales_csv(report: DailySalesReport) -> str:
+    rows: list[list[object]] = [
+        ["business_date", report.business_date],
+        ["restaurant_id", report.restaurant_id],
+        ["branch_id", report.branch_id or ""],
+        ["orders", report.orders],
+        ["collected_orders", report.collected_orders],
+        ["ready_orders", report.ready_orders],
+        ["uncollected_orders", report.uncollected_orders],
+        ["cancelled_orders", report.cancelled_orders],
+        ["revenue", report.revenue],
+        ["average_order_value", report.average_order_value],
+        [],
+        ["sold_products"],
+        ["menu_item_id", "name", "quantity", "revenue"],
+    ]
+    rows.extend(
+        [item.menu_item_id, item.name, item.quantity, item.revenue] for item in report.top_items
+    )
+    rows.extend(
+        [
+            [],
+            ["payment_methods"],
+            ["provider", "payments", "revenue"],
+        ]
+    )
+    rows.extend(
+        [payment.provider, payment.payments, payment.revenue] for payment in report.sales_by_payment
+    )
+    rows.extend(
+        [
+            [],
+            ["channels"],
+            ["channel", "orders", "revenue"],
+        ]
+    )
+    rows.extend(
+        [channel.channel, channel.orders, channel.revenue] for channel in report.sales_by_channel
+    )
+    rows.extend(
+        [
+            [],
+            ["cashier_activity"],
+            [
+                "user_id",
+                "name",
+                "email",
+                "orders_created",
+                "payments_confirmed",
+                "orders_collected",
+                "revenue_collected",
+            ],
+        ]
+    )
+    rows.extend(
+        [
+            cashier.user_id or "",
+            cashier.name,
+            cashier.email or "",
+            cashier.orders_created,
+            cashier.payments_confirmed,
+            cashier.orders_collected,
+            cashier.revenue_collected,
+        ]
+        for cashier in report.cashier_activity
+    )
+    return _csv_text(
+        ["section", "value_1", "value_2", "value_3", "value_4", "value_5", "value_6"], rows
+    )
+
+
+def export_orders_csv(
+    db: Session,
+    restaurant_id: UUID,
+    business_date: date,
+    branch_id: UUID | None = None,
+) -> str:
+    query = (
+        db.query(Order, User.email)
+        .outerjoin(User, User.id == Order.created_by)
+        .filter(Order.restaurant_id == restaurant_id, Order.business_date == business_date)
+    )
+    if branch_id is not None:
+        query = query.filter(Order.branch_id == branch_id)
+    rows = [
+        [
+            order.business_date,
+            order.branch_id,
+            order.display_number,
+            order.channel,
+            order.order_status,
+            order.payment_status,
+            order.payment_provider or "",
+            order.total,
+            order.currency,
+            creator_email or "",
+            order.created_at or "",
+            order.ready_at or "",
+            order.collected_at or "",
+        ]
+        for order, creator_email in query.order_by(Order.created_at, Order.daily_sequence).all()
+    ]
+    return _csv_text(
+        [
+            "business_date",
+            "branch_id",
+            "display_number",
+            "channel",
+            "order_status",
+            "payment_status",
+            "payment_provider",
+            "total",
+            "currency",
+            "created_by",
+            "created_at",
+            "ready_at",
+            "collected_at",
+        ],
+        rows,
+    )
+
+
+def export_payments_csv(
+    db: Session,
+    restaurant_id: UUID,
+    business_date: date,
+    branch_id: UUID | None = None,
+) -> str:
+    query = (
+        db.query(Payment, Order)
+        .join(Order, Order.id == Payment.order_id)
+        .filter(Payment.restaurant_id == restaurant_id, Order.business_date == business_date)
+    )
+    if branch_id is not None:
+        query = query.filter(Order.branch_id == branch_id)
+    rows = [
+        [
+            order.business_date,
+            order.branch_id,
+            order.display_number,
+            payment.provider,
+            payment.reference,
+            payment.status,
+            payment.amount,
+            payment.currency,
+            payment.provider_transaction_id or "",
+            payment.created_at or "",
+            payment.completed_at or "",
+        ]
+        for payment, order in query.order_by(Order.created_at, Order.daily_sequence).all()
+    ]
+    return _csv_text(
+        [
+            "business_date",
+            "branch_id",
+            "display_number",
+            "provider",
+            "reference",
+            "status",
+            "amount",
+            "currency",
+            "provider_transaction_id",
+            "created_at",
+            "completed_at",
+        ],
+        rows,
+    )
+
+
+def export_audit_logs_csv(
+    db: Session,
+    restaurant_id: UUID,
+    *,
+    branch_id: UUID | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> str:
+    from app.audit.service import list_audit_logs
+
+    rows = [
+        [
+            log.created_at or "",
+            log.action,
+            log.entity_type,
+            log.entity_id,
+            user.email if user else "",
+            _json_cell(log.old_values),
+            _json_cell(log.new_values),
+        ]
+        for log, user in list_audit_logs(
+            db,
+            restaurant_id,
+            branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=1000,
+        )
+    ]
+    return _csv_text(
+        [
+            "created_at",
+            "action",
+            "entity_type",
+            "entity_id",
+            "user_email",
+            "old_values",
+            "new_values",
+        ],
+        rows,
+    )
+
+
+def export_inventory_balances_csv(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+) -> str:
+    rows = [
+        [ingredient.id, ingredient.name, ingredient.unit, quantity]
+        for ingredient, quantity in inventory_service.list_stock_balances(
+            db, restaurant_id, branch_id
+        )
+    ]
+    return _csv_text(["ingredient_id", "name", "unit", "quantity_on_hand"], rows)
