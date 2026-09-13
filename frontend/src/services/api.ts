@@ -178,6 +178,28 @@ export type StockBalance = {
   quantity_on_hand: string;
 };
 
+export type StockThreshold = {
+  id: string;
+  restaurant_id: string;
+  branch_id: string;
+  ingredient_id: string;
+  ingredient_name: string;
+  unit: string;
+  warning_quantity: string;
+  critical_quantity: string;
+};
+
+export type LowStockAlert = {
+  ingredient_id: string;
+  ingredient_name: string;
+  unit: string;
+  quantity_on_hand: string;
+  warning_quantity: string;
+  critical_quantity: string;
+  severity: "LOW" | "CRITICAL";
+  message: string;
+};
+
 export type DailySalesReport = {
   restaurant_id: string;
   branch_id: string | null;

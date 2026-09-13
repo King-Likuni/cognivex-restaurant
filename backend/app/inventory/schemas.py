@@ -97,3 +97,41 @@ class StockBalanceResponse(BaseModel):
     ingredient_name: str
     unit: str
     quantity_on_hand: Decimal
+
+
+class StockThresholdUpsert(BaseModel):
+    warning_quantity: Decimal = Field(..., ge=Decimal("0.000"), max_digits=12, decimal_places=3)
+    critical_quantity: Decimal = Field(
+        default=Decimal("0.000"),
+        ge=Decimal("0.000"),
+        max_digits=12,
+        decimal_places=3,
+    )
+
+    @model_validator(mode="after")
+    def validate_critical_threshold(self) -> "StockThresholdUpsert":
+        if self.critical_quantity > self.warning_quantity:
+            raise ValueError("Critical quantity cannot be greater than warning quantity")
+        return self
+
+
+class StockThresholdResponse(BaseModel):
+    id: UUID
+    restaurant_id: UUID
+    branch_id: UUID
+    ingredient_id: UUID
+    ingredient_name: str
+    unit: str
+    warning_quantity: Decimal
+    critical_quantity: Decimal
+
+
+class LowStockAlertResponse(BaseModel):
+    ingredient_id: UUID
+    ingredient_name: str
+    unit: str
+    quantity_on_hand: Decimal
+    warning_quantity: Decimal
+    critical_quantity: Decimal
+    severity: str
+    message: str

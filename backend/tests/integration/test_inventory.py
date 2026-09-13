@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.audit.models import AuditLog
+from app.auth.schemas import UserCreate
+from app.auth.service import create_user
 from app.inventory.enums import StockMovementType
 from app.inventory.models import StockMovement
 from app.orders.enums import OrderStatus
@@ -300,3 +302,121 @@ def test_collecting_recipe_order_rejects_insufficient_stock_without_consumption(
         .all()
     )
     assert history[-1].new_status == OrderStatus.READY.value
+
+
+def test_stock_thresholds_surface_low_and_critical_alerts(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    headers = login(api_client, "owner@example.com", "ownerpassword")
+    ingredient, location = create_ingredient_location_and_stock(
+        api_client,
+        restaurant_id,
+        branch_id,
+        headers,
+        quantity="4.000",
+    )
+
+    invalid_threshold_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+        headers=headers,
+        json={"warning_quantity": "5.000", "critical_quantity": "6.000"},
+    )
+    assert invalid_threshold_response.status_code == 422
+
+    threshold_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+        headers=headers,
+        json={"warning_quantity": "5.000", "critical_quantity": "2.000"},
+    )
+    assert threshold_response.status_code == 200, threshold_response.text
+    assert threshold_response.json()["ingredient_name"] == "Chicken Portion"
+
+    low_alert_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/low-stock-alerts",
+        headers=headers,
+    )
+    assert low_alert_response.status_code == 200, low_alert_response.text
+    low_alert = low_alert_response.json()[0]
+    assert low_alert["ingredient_id"] == ingredient["id"]
+    assert low_alert["severity"] == "LOW"
+    assert low_alert["quantity_on_hand"] == "4.000"
+
+    wastage_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=headers,
+        json={
+            "stock_location_id": location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.WASTAGE.value,
+            "quantity": "-3.000",
+        },
+    )
+    assert wastage_response.status_code == 201, wastage_response.text
+
+    critical_alert_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/low-stock-alerts",
+        headers=headers,
+    )
+    assert critical_alert_response.status_code == 200, critical_alert_response.text
+    critical_alert = critical_alert_response.json()[0]
+    assert critical_alert["severity"] == "CRITICAL"
+    assert critical_alert["quantity_on_hand"] == "1.000"
+    assert critical_alert["message"] == (
+        "Chicken Portion is 1.000 portion. Check balances and place a stock order."
+    )
+
+
+def test_kitchen_can_read_low_stock_alerts_but_not_configure_thresholds(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    ingredient, _location = create_ingredient_location_and_stock(
+        api_client,
+        restaurant_id,
+        branch_id,
+        owner_headers,
+        quantity="1.000",
+    )
+    threshold_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+        headers=owner_headers,
+        json={"warning_quantity": "5.000", "critical_quantity": "2.000"},
+    )
+    assert threshold_response.status_code == 200, threshold_response.text
+
+    create_user(
+        db_session,
+        UserCreate(
+            email="kitchen@example.com",
+            password="kitchenpassword",
+            first_name="Kitchen",
+            last_name="Staff",
+            role_name="KITCHEN",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    kitchen_headers = login(api_client, "kitchen@example.com", "kitchenpassword")
+
+    alert_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/low-stock-alerts",
+        headers=kitchen_headers,
+    )
+    assert alert_response.status_code == 200, alert_response.text
+    assert alert_response.json()[0]["severity"] == "CRITICAL"
+
+    forbidden_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+        headers=kitchen_headers,
+        json={"warning_quantity": "10.000", "critical_quantity": "3.000"},
+    )
+    assert forbidden_response.status_code == 403

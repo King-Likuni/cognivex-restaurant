@@ -319,6 +319,7 @@ button:disabled {
 .cart-lines,
 .order-stack,
 .data-list,
+.alert-list,
 .event-list,
 .branch-admin-list,
 .staff-list,
@@ -327,6 +328,43 @@ button:disabled {
 .customer-menu-list {
   display: grid;
   gap: 10px;
+}
+
+.alert-list {
+  display: grid;
+  gap: 10px;
+}
+
+.stock-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid #e0e5ec;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.stock-alert strong,
+.stock-alert span {
+  display: block;
+}
+
+.stock-alert span {
+  margin-top: 3px;
+  color: #526071;
+}
+
+.stock-alert.low {
+  border-color: #f1d28f;
+  background: #fff8e8;
+  color: #7a4c0c;
+}
+
+.stock-alert.critical {
+  border-color: #e8b1aa;
+  background: #fff1ef;
+  color: #9a2f25;
 }
 
 .cart-line,

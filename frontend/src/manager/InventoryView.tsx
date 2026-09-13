@@ -1,4 +1,4 @@
-import { Boxes, Plus, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, Boxes, Plus, RefreshCw, Save } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type { AppContext } from "../App";
@@ -6,10 +6,12 @@ import { EmptyState, Field, Notice, Panel } from "../components/ui";
 import {
   apiRequest,
   type Ingredient,
+  type LowStockAlert,
   type MenuItem,
   type RecipeItem,
   type StockBalance,
   type StockLocation,
+  type StockThreshold,
 } from "../services/api";
 
 type Props = {
@@ -22,6 +24,8 @@ export function InventoryView({ context, token }: Props) {
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [balances, setBalances] = useState<StockBalance[]>([]);
+  const [thresholds, setThresholds] = useState<StockThreshold[]>([]);
+  const [alerts, setAlerts] = useState<LowStockAlert[]>([]);
   const [recipeItems, setRecipeItems] = useState<RecipeItem[]>([]);
   const [selectedMenuItemId, setSelectedMenuItemId] = useState("");
   const [ingredientName, setIngredientName] = useState("");
@@ -29,6 +33,9 @@ export function InventoryView({ context, token }: Props) {
   const [locationName, setLocationName] = useState("Kitchen");
   const [stockQuantity, setStockQuantity] = useState("10.000");
   const [recipeIngredientId, setRecipeIngredientId] = useState("");
+  const [thresholdIngredientId, setThresholdIngredientId] = useState("");
+  const [warningQuantity, setWarningQuantity] = useState("10.000");
+  const [criticalQuantity, setCriticalQuantity] = useState("3.000");
   const [recipeQuantity, setRecipeQuantity] = useState("1.000");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,10 +43,14 @@ export function InventoryView({ context, token }: Props) {
   const loadInventory = useCallback(async () => {
     setError(null);
     try {
-      const [nextIngredients, nextLocations, nextItems, nextBalances] = await Promise.all([
-        apiRequest<Ingredient[]>(`/api/v1/restaurants/${context.restaurant.id}/inventory/ingredients`, {
-          token,
-        }),
+      const [nextIngredients, nextLocations, nextItems, nextBalances, nextThresholds, nextAlerts] =
+        await Promise.all([
+          apiRequest<Ingredient[]>(
+            `/api/v1/restaurants/${context.restaurant.id}/inventory/ingredients`,
+            {
+              token,
+            },
+          ),
         apiRequest<StockLocation[]>(
           `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/locations`,
           { token },
@@ -49,12 +60,23 @@ export function InventoryView({ context, token }: Props) {
           `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/balances`,
           { token },
         ),
-      ]);
+          apiRequest<StockThreshold[]>(
+            `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/thresholds`,
+            { token },
+          ),
+          apiRequest<LowStockAlert[]>(
+            `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/low-stock-alerts`,
+            { token },
+          ),
+        ]);
       setIngredients(nextIngredients);
       setLocations(nextLocations);
       setMenuItems(nextItems);
       setBalances(nextBalances);
+      setThresholds(nextThresholds);
+      setAlerts(nextAlerts);
       setRecipeIngredientId(nextIngredients[0]?.id ?? "");
+      setThresholdIngredientId((current) => current || nextIngredients[0]?.id || "");
       setSelectedMenuItemId((current) => current || nextItems[0]?.id || "");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load inventory");
@@ -170,11 +192,59 @@ export function InventoryView({ context, token }: Props) {
     }
   }
 
+  async function saveThreshold(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    const ingredientId = thresholdIngredientId || ingredients[0]?.id;
+    if (!ingredientId) {
+      setError("Create an ingredient first");
+      return;
+    }
+    try {
+      await apiRequest<StockThreshold>(
+        `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/thresholds/${ingredientId}`,
+        {
+          method: "PUT",
+          token,
+          body: {
+            warning_quantity: warningQuantity,
+            critical_quantity: criticalQuantity,
+          },
+        },
+      );
+      setNotice("Stock threshold saved");
+      await loadInventory();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save stock threshold");
+    }
+  }
+
   return (
     <div className="view-grid two-columns">
       <div className="view-stack">
         {error ? <Notice tone="error">{error}</Notice> : null}
         {notice ? <Notice tone="success">{notice}</Notice> : null}
+        <Panel title={`Stock Alerts (${alerts.length})`}>
+          <div className="alert-list">
+            {alerts.map((alert) => (
+              <div
+                className={
+                  alert.severity === "CRITICAL" ? "stock-alert critical" : "stock-alert low"
+                }
+                key={alert.ingredient_id}
+              >
+                <AlertTriangle size={18} />
+                <div>
+                  <strong>{alert.ingredient_name}</strong>
+                  <span>{alert.message}</span>
+                </div>
+              </div>
+            ))}
+            {!alerts.length ? (
+              <EmptyState>All configured stock thresholds are healthy</EmptyState>
+            ) : null}
+          </div>
+        </Panel>
         <Panel
           title="Ingredients"
           action={
@@ -311,6 +381,55 @@ export function InventoryView({ context, token }: Props) {
               </div>
             ))}
             {!recipeItems.length ? <EmptyState>No recipe items for this menu item</EmptyState> : null}
+          </div>
+        </Panel>
+
+        <Panel title="Stock Thresholds">
+          <form className="compact-form" onSubmit={saveThreshold}>
+            <Field label="Ingredient">
+              <select
+                value={thresholdIngredientId}
+                onChange={(event) => setThresholdIngredientId(event.target.value)}
+              >
+                {ingredients.map((ingredient) => (
+                  <option key={ingredient.id} value={ingredient.id}>
+                    {ingredient.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Warn below">
+              <input
+                type="number"
+                step="0.001"
+                value={warningQuantity}
+                onChange={(event) => setWarningQuantity(event.target.value)}
+              />
+            </Field>
+            <Field label="Critical below">
+              <input
+                type="number"
+                step="0.001"
+                value={criticalQuantity}
+                onChange={(event) => setCriticalQuantity(event.target.value)}
+              />
+            </Field>
+            <button className="primary-action" type="submit">
+              <Save size={18} />
+              Save threshold
+            </button>
+          </form>
+          <div className="data-list">
+            {thresholds.map((threshold) => (
+              <div className="data-row" key={threshold.id}>
+                <strong>{threshold.ingredient_name}</strong>
+                <span>
+                  Warn {Number(threshold.warning_quantity).toFixed(3)} / Critical{" "}
+                  {Number(threshold.critical_quantity).toFixed(3)} {threshold.unit}
+                </span>
+              </div>
+            ))}
+            {!thresholds.length ? <EmptyState>No thresholds configured yet</EmptyState> : null}
           </div>
         </Panel>
 

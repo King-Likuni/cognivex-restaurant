@@ -7,12 +7,18 @@ from sqlalchemy.orm import Session
 
 from app.auth.models import User
 from app.core.database import get_db
-from app.core.dependencies import ensure_restaurant_access, require_branch_access, require_manager
+from app.core.dependencies import (
+    RoleChecker,
+    ensure_restaurant_access,
+    require_branch_access,
+    require_manager,
+)
 from app.inventory import service
 from app.inventory.schemas import (
     IngredientCreate,
     IngredientResponse,
     IngredientUpdate,
+    LowStockAlertResponse,
     RecipeItemCreate,
     RecipeItemResponse,
     RecipeItemUpdate,
@@ -21,9 +27,12 @@ from app.inventory.schemas import (
     StockLocationResponse,
     StockMovementCreate,
     StockMovementResponse,
+    StockThresholdResponse,
+    StockThresholdUpsert,
 )
 
 router = APIRouter(prefix="/restaurants/{restaurant_id}/inventory", tags=["Inventory"])
+require_inventory_alert_reader = RoleChecker(["OWNER", "MANAGER", "KITCHEN"])
 
 
 def recipe_response(recipe_item) -> RecipeItemResponse:
@@ -34,6 +43,19 @@ def recipe_response(recipe_item) -> RecipeItemResponse:
         ingredient_name=recipe_item.ingredient.name,
         unit=recipe_item.ingredient.unit,
         quantity=recipe_item.quantity,
+    )
+
+
+def threshold_response(threshold) -> StockThresholdResponse:
+    return StockThresholdResponse(
+        id=threshold.id,
+        restaurant_id=threshold.restaurant_id,
+        branch_id=threshold.branch_id,
+        ingredient_id=threshold.ingredient_id,
+        ingredient_name=threshold.ingredient.name,
+        unit=threshold.ingredient.unit,
+        warning_quantity=threshold.warning_quantity,
+        critical_quantity=threshold.critical_quantity,
     )
 
 
@@ -271,5 +293,86 @@ def list_stock_balances(
             restaurant_id,
             branch_id,
             stock_location_id=stock_location_id,
+        )
+    ]
+
+
+@router.put(
+    "/branches/{branch_id}/thresholds/{ingredient_id}",
+    response_model=StockThresholdResponse,
+)
+def upsert_stock_threshold(
+    restaurant_id: UUID,
+    branch_id: UUID,
+    ingredient_id: UUID,
+    data: StockThresholdUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_manager),
+    branch_user: User = Depends(require_branch_access),
+):
+    ensure_restaurant_access(current_user, restaurant_id)
+    if branch_user.id != current_user.id:
+        raise HTTPException(status_code=403, detail="Branch access validation failed")
+    try:
+        return threshold_response(
+            service.upsert_stock_threshold(
+                db,
+                restaurant_id,
+                branch_id,
+                ingredient_id,
+                data,
+                current_user,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/branches/{branch_id}/thresholds", response_model=list[StockThresholdResponse])
+def list_stock_thresholds(
+    restaurant_id: UUID,
+    branch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_manager),
+    branch_user: User = Depends(require_branch_access),
+):
+    ensure_restaurant_access(current_user, restaurant_id)
+    if branch_user.id != current_user.id:
+        raise HTTPException(status_code=403, detail="Branch access validation failed")
+    return [
+        threshold_response(threshold)
+        for threshold in service.list_stock_thresholds(db, restaurant_id, branch_id)
+    ]
+
+
+@router.get(
+    "/branches/{branch_id}/low-stock-alerts",
+    response_model=list[LowStockAlertResponse],
+)
+def list_low_stock_alerts(
+    restaurant_id: UUID,
+    branch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_inventory_alert_reader),
+    branch_user: User = Depends(require_branch_access),
+):
+    ensure_restaurant_access(current_user, restaurant_id)
+    if branch_user.id != current_user.id:
+        raise HTTPException(status_code=403, detail="Branch access validation failed")
+    return [
+        LowStockAlertResponse(
+            ingredient_id=threshold.ingredient_id,
+            ingredient_name=threshold.ingredient.name,
+            unit=threshold.ingredient.unit,
+            quantity_on_hand=quantity_on_hand,
+            warning_quantity=threshold.warning_quantity,
+            critical_quantity=threshold.critical_quantity,
+            severity=severity,
+            message=message,
+        )
+        for threshold, quantity_on_hand, severity, message in service.list_low_stock_alerts(
+            db,
+            restaurant_id,
+            branch_id,
         )
     ]

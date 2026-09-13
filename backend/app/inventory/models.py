@@ -42,6 +42,32 @@ class Ingredient(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class StockThreshold(Base):
+    __tablename__ = "stock_thresholds"
+    __table_args__ = (
+        UniqueConstraint(
+            "restaurant_id",
+            "branch_id",
+            "ingredient_id",
+            name="uq_stock_thresholds_branch_ingredient",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    restaurant_id = Column(
+        UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True
+    )
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=False, index=True)
+    ingredient_id = Column(UUID(as_uuid=True), ForeignKey("ingredients.id"), nullable=False)
+    warning_quantity = Column(Numeric(12, 3), nullable=False)
+    critical_quantity = Column(Numeric(12, 3), nullable=False)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    ingredient = relationship("Ingredient")
+
+
 class MenuItemRecipeItem(Base):
     __tablename__ = "menu_item_recipe_items"
     __table_args__ = (

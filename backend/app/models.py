@@ -7,7 +7,13 @@ string-based relationship targets across modules.
 from app.audit.models import AuditLog
 from app.auth.models import PasswordResetToken, Role, User, user_branches
 from app.customers.models import Customer
-from app.inventory.models import Ingredient, MenuItemRecipeItem, StockLocation, StockMovement
+from app.inventory.models import (
+    Ingredient,
+    MenuItemRecipeItem,
+    StockLocation,
+    StockMovement,
+    StockThreshold,
+)
 from app.menu.models import MenuCategory, MenuItem
 from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.payments.models import Payment, PaymentEvent
@@ -32,6 +38,7 @@ __all__ = [
     "Role",
     "StockLocation",
     "StockMovement",
+    "StockThreshold",
     "User",
     "user_branches",
 ]

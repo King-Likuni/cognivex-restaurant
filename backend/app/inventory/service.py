@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from app.audit.models import AuditLog
 from app.auth.models import User
 from app.inventory.enums import StockMovementType
-from app.inventory.models import Ingredient, MenuItemRecipeItem, StockLocation, StockMovement
+from app.inventory.models import (
+    Ingredient,
+    MenuItemRecipeItem,
+    StockLocation,
+    StockMovement,
+    StockThreshold,
+)
 from app.inventory.schemas import (
     IngredientCreate,
     IngredientUpdate,
@@ -18,6 +24,7 @@ from app.inventory.schemas import (
     RecipeItemUpdate,
     StockLocationCreate,
     StockMovementCreate,
+    StockThresholdUpsert,
 )
 from app.menu.models import MenuItem
 from app.orders.models import Order
@@ -332,6 +339,126 @@ def list_stock_balances(
         (ingredient, balances_by_ingredient.get(ingredient.id, Decimal("0.000")))
         for ingredient in ingredients
     ]
+
+
+def upsert_stock_threshold(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    ingredient_id: UUID,
+    data: StockThresholdUpsert,
+    updated_by: User,
+) -> StockThreshold:
+    branch = get_branch(db, restaurant_id, branch_id)
+    if branch is None:
+        raise ValueError("Branch not found")
+    ingredient = get_ingredient(db, restaurant_id, ingredient_id)
+    if ingredient is None:
+        raise ValueError("Ingredient not found")
+
+    threshold = (
+        db.query(StockThreshold)
+        .filter(
+            StockThreshold.restaurant_id == restaurant_id,
+            StockThreshold.branch_id == branch_id,
+            StockThreshold.ingredient_id == ingredient_id,
+        )
+        .first()
+    )
+    previous_values = None
+    if threshold is None:
+        threshold = StockThreshold(
+            restaurant_id=restaurant_id,
+            branch_id=branch_id,
+            ingredient_id=ingredient_id,
+            warning_quantity=data.warning_quantity,
+            critical_quantity=data.critical_quantity,
+            updated_by=updated_by.id,
+        )
+        db.add(threshold)
+    else:
+        previous_values = {
+            "warning_quantity": str(threshold.warning_quantity),
+            "critical_quantity": str(threshold.critical_quantity),
+        }
+        threshold.warning_quantity = data.warning_quantity
+        threshold.critical_quantity = data.critical_quantity
+        threshold.updated_by = updated_by.id
+
+    db.flush()
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant_id,
+            user_id=updated_by.id,
+            action="STOCK_THRESHOLD_UPDATED",
+            entity_type="stock_threshold",
+            entity_id=threshold.id,
+            old_values=previous_values,
+            new_values={
+                "branch_id": str(branch_id),
+                "ingredient_id": str(ingredient_id),
+                "warning_quantity": str(data.warning_quantity),
+                "critical_quantity": str(data.critical_quantity),
+            },
+        )
+    )
+    db.commit()
+    db.refresh(threshold)
+    return threshold
+
+
+def list_stock_thresholds(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+) -> list[StockThreshold]:
+    return (
+        db.query(StockThreshold)
+        .join(Ingredient, Ingredient.id == StockThreshold.ingredient_id)
+        .filter(
+            StockThreshold.restaurant_id == restaurant_id,
+            StockThreshold.branch_id == branch_id,
+        )
+        .order_by(Ingredient.name)
+        .all()
+    )
+
+
+def list_low_stock_alerts(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+) -> list[tuple[StockThreshold, Decimal, str, str]]:
+    balances_by_ingredient = {
+        ingredient.id: quantity
+        for ingredient, quantity in list_stock_balances(db, restaurant_id, branch_id)
+    }
+    alerts: list[tuple[StockThreshold, Decimal, str, str]] = []
+    for threshold in list_stock_thresholds(db, restaurant_id, branch_id):
+        quantity_on_hand = balances_by_ingredient.get(
+            threshold.ingredient_id,
+            Decimal("0.000"),
+        )
+        severity = None
+        if quantity_on_hand <= threshold.critical_quantity:
+            severity = "CRITICAL"
+        elif quantity_on_hand <= threshold.warning_quantity:
+            severity = "LOW"
+        if severity is None:
+            continue
+        message = (
+            f"{threshold.ingredient.name} is {quantity_on_hand:.3f} {threshold.ingredient.unit}. "
+            "Check balances and place a stock order."
+        )
+        alerts.append((threshold, quantity_on_hand, severity, message))
+    return sorted(
+        alerts,
+        key=lambda row: (
+            0 if row[2] == "CRITICAL" else 1,
+            row[1],
+            row[0].ingredient.name.lower(),
+        ),
+    )
 
 
 def create_stock_movement(

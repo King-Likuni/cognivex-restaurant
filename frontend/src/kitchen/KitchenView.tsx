@@ -1,4 +1,4 @@
-import { CheckCircle2, ChefHat, Play, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChefHat, Play, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type { AppContext } from "../App";
@@ -7,6 +7,7 @@ import {
   apiRequest,
   realtimeUrl,
   type KitchenBoard,
+  type LowStockAlert,
   type Order,
   type RealtimeEvent,
 } from "../services/api";
@@ -29,6 +30,7 @@ const EMPTY_BOARD: KitchenBoard = { new: [], preparing: [], ready: [], collected
 
 export function KitchenView({ context, token }: Props) {
   const [board, setBoard] = useState<KitchenBoard>(EMPTY_BOARD);
+  const [stockAlerts, setStockAlerts] = useState<LowStockAlert[]>([]);
   const [events, setEvents] = useState<RealtimeEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -41,6 +43,15 @@ export function KitchenView({ context, token }: Props) {
         { token },
       );
       setBoard(nextBoard);
+      try {
+        const nextAlerts = await apiRequest<LowStockAlert[]>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/low-stock-alerts`,
+          { token },
+        );
+        setStockAlerts(nextAlerts);
+      } catch {
+        setStockAlerts([]);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load kitchen board");
     }
@@ -127,6 +138,26 @@ export function KitchenView({ context, token }: Props) {
         </button>
       </div>
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {stockAlerts.length ? (
+        <Panel title={`Stock Alerts (${stockAlerts.length})`}>
+          <div className="alert-list">
+            {stockAlerts.map((alert) => (
+              <div
+                className={
+                  alert.severity === "CRITICAL" ? "stock-alert critical" : "stock-alert low"
+                }
+                key={alert.ingredient_id}
+              >
+                <AlertTriangle size={18} />
+                <div>
+                  <strong>{alert.ingredient_name}</strong>
+                  <span>{alert.message}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
       <div className="board-grid">
         {columns.map((column) => (
           <Panel key={column.title} title={`${column.title} (${column.orders.length})`}>
