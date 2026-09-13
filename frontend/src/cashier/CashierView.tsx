@@ -127,14 +127,14 @@ export function CashierView({ context, token }: Props) {
     setError(null);
     try {
       const items = await apiRequest<MenuItem[]>(
-        `/api/v1/restaurants/${context.restaurant.id}/menu/items`,
-        { token },
+        `/api/v1/restaurants/${context.restaurant.id}/menu/branches/${context.branch.id}/items`,
+        { token, params: { include_unavailable: true } },
       );
       setMenuItems(items);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load menu");
     }
-  }, [context.restaurant.id, token]);
+  }, [context.branch.id, context.restaurant.id, token]);
 
   useEffect(() => {
     void loadMenu();
@@ -208,6 +208,11 @@ export function CashierView({ context, token }: Props) {
   }, [cart, menuItems]);
 
   function addToCart(menuItemId: string) {
+    const item = menuItems.find((candidate) => candidate.id === menuItemId);
+    if (!item?.is_available_for_sale) {
+      setError(item?.stock_message ?? "This menu item is not available for sale");
+      return;
+    }
     setCart((current) => {
       const existing = current.find((line) => line.menuItemId === menuItemId);
       if (existing) {
@@ -446,14 +451,15 @@ export function CashierView({ context, token }: Props) {
             {menuItems.map((item) => (
               <button
                 key={item.id}
-                className="menu-tile"
+                className={item.is_available_for_sale ? "menu-tile" : "menu-tile unavailable"}
                 data-testid={`menu-item-${item.id}`}
                 type="button"
                 onClick={() => addToCart(item.id)}
-                disabled={!item.is_available}
+                disabled={!item.is_available_for_sale}
               >
                 <strong>{item.name}</strong>
                 <span>{formatMoney(item.price)}</span>
+                {item.stock_message ? <small>{item.stock_message}</small> : null}
               </button>
             ))}
             {!menuItems.length ? <EmptyState>No available menu items yet</EmptyState> : null}

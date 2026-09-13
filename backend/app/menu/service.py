@@ -89,6 +89,26 @@ def list_items(
     return query.order_by(MenuItem.name).all()
 
 
+def list_branch_items(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    include_unavailable: bool = False,
+) -> list[tuple[MenuItem, object]]:
+    from app.inventory.service import get_menu_item_stock_statuses
+    from app.orders.service import get_active_restaurant_and_branch
+
+    get_active_restaurant_and_branch(db, restaurant_id, branch_id)
+    items = list_items(db, restaurant_id, include_unavailable=include_unavailable)
+    statuses = get_menu_item_stock_statuses(
+        db,
+        restaurant_id,
+        branch_id,
+        [item.id for item in items],
+    )
+    return [(item, statuses[item.id]) for item in items if item.id in statuses]
+
+
 def get_item(db: Session, restaurant_id: UUID, item_id: UUID) -> MenuItem | None:
     return (
         db.query(MenuItem)

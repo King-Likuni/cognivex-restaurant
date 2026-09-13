@@ -1,6 +1,7 @@
 """Inventory service layer."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
@@ -29,6 +30,13 @@ from app.inventory.schemas import (
 from app.menu.models import MenuItem
 from app.orders.models import Order
 from app.tenants.models import Branch
+
+
+@dataclass(frozen=True)
+class MenuItemStockStatus:
+    is_available_for_sale: bool
+    stock_status: str
+    stock_message: str | None = None
 
 
 def get_branch(db: Session, restaurant_id: UUID, branch_id: UUID) -> Branch | None:
@@ -339,6 +347,207 @@ def list_stock_balances(
         (ingredient, balances_by_ingredient.get(ingredient.id, Decimal("0.000")))
         for ingredient in ingredients
     ]
+
+
+def get_thresholds_by_ingredient(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+) -> dict[UUID, StockThreshold]:
+    return {
+        threshold.ingredient_id: threshold
+        for threshold in db.query(StockThreshold)
+        .filter(
+            StockThreshold.restaurant_id == restaurant_id,
+            StockThreshold.branch_id == branch_id,
+        )
+        .all()
+    }
+
+
+def get_balances_by_ingredient(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    *,
+    stock_location_id: UUID | None = None,
+) -> dict[UUID, Decimal]:
+    grouped = (
+        db.query(StockMovement.ingredient_id, func.coalesce(func.sum(StockMovement.quantity), 0))
+        .filter(
+            StockMovement.restaurant_id == restaurant_id,
+            StockMovement.branch_id == branch_id,
+        )
+        .group_by(StockMovement.ingredient_id)
+    )
+    if stock_location_id is not None:
+        grouped = grouped.filter(StockMovement.stock_location_id == stock_location_id)
+    return {ingredient_id: Decimal(quantity or 0) for ingredient_id, quantity in grouped.all()}
+
+
+def summarize_menu_item_stock(
+    *,
+    item_name: str,
+    required_by_ingredient: dict[UUID, Decimal],
+    ingredients_by_id: dict[UUID, Ingredient],
+    balances_by_ingredient: dict[UUID, Decimal],
+    thresholds_by_ingredient: dict[UUID, StockThreshold],
+) -> MenuItemStockStatus:
+    if not required_by_ingredient:
+        return MenuItemStockStatus(
+            is_available_for_sale=True,
+            stock_status="UNTRACKED",
+            stock_message="No recipe stock tracking configured",
+        )
+
+    low_messages: list[str] = []
+    for ingredient_id, required_quantity in required_by_ingredient.items():
+        ingredient = ingredients_by_id[ingredient_id]
+        quantity_on_hand = balances_by_ingredient.get(ingredient_id, Decimal("0.000"))
+        threshold = thresholds_by_ingredient.get(ingredient_id)
+        if quantity_on_hand < required_quantity:
+            return MenuItemStockStatus(
+                is_available_for_sale=False,
+                stock_status="OUT_OF_STOCK",
+                stock_message=f"{item_name} cannot be sold: not enough {ingredient.name}.",
+            )
+        if threshold is not None and quantity_on_hand <= threshold.critical_quantity:
+            return MenuItemStockStatus(
+                is_available_for_sale=False,
+                stock_status="CRITICAL_STOCK",
+                stock_message=(
+                    f"{item_name} is paused: {ingredient.name} is at critical stock level."
+                ),
+            )
+        if threshold is not None and quantity_on_hand <= threshold.warning_quantity:
+            low_messages.append(
+                f"{ingredient.name} is low ({quantity_on_hand:.3f} {ingredient.unit})"
+            )
+
+    if low_messages:
+        return MenuItemStockStatus(
+            is_available_for_sale=True,
+            stock_status="LOW_STOCK",
+            stock_message=f"{item_name} can still be sold, but {'; '.join(low_messages)}.",
+        )
+    return MenuItemStockStatus(
+        is_available_for_sale=True,
+        stock_status="AVAILABLE",
+        stock_message="Stock is available",
+    )
+
+
+def get_menu_item_stock_statuses(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    menu_item_ids: list[UUID],
+) -> dict[UUID, MenuItemStockStatus]:
+    if not menu_item_ids:
+        return {}
+
+    location = get_default_consumption_location(db, restaurant_id, branch_id)
+    balances_by_ingredient = get_balances_by_ingredient(
+        db,
+        restaurant_id,
+        branch_id,
+        stock_location_id=location.id if location else None,
+    )
+    thresholds_by_ingredient = get_thresholds_by_ingredient(db, restaurant_id, branch_id)
+    recipe_items = (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(
+            MenuItemRecipeItem.menu_item_id.in_(menu_item_ids),
+            Ingredient.restaurant_id == restaurant_id,
+        )
+        .all()
+    )
+    required_by_item: dict[UUID, dict[UUID, Decimal]] = defaultdict(dict)
+    ingredients_by_id: dict[UUID, Ingredient] = {}
+    for recipe_item in recipe_items:
+        required_by_item[recipe_item.menu_item_id][recipe_item.ingredient_id] = Decimal(
+            recipe_item.quantity
+        )
+        ingredients_by_id[recipe_item.ingredient_id] = recipe_item.ingredient
+
+    items = (
+        db.query(MenuItem)
+        .filter(MenuItem.restaurant_id == restaurant_id, MenuItem.id.in_(menu_item_ids))
+        .all()
+    )
+    return {
+        item.id: (
+            MenuItemStockStatus(
+                is_available_for_sale=False,
+                stock_status="MANUALLY_UNAVAILABLE",
+                stock_message=f"{item.name} is currently unavailable.",
+            )
+            if not item.is_available
+            else summarize_menu_item_stock(
+                item_name=item.name,
+                required_by_ingredient=required_by_item.get(item.id, {}),
+                ingredients_by_id=ingredients_by_id,
+                balances_by_ingredient=balances_by_ingredient,
+                thresholds_by_ingredient=thresholds_by_ingredient,
+            )
+        )
+        for item in items
+    }
+
+
+def validate_order_stock_available(
+    db: Session,
+    restaurant_id: UUID,
+    branch_id: UUID,
+    items,
+) -> None:
+    menu_item_ids = [line.menu_item_id for line in items]
+    if not menu_item_ids:
+        return
+    recipe_items = (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(
+            MenuItemRecipeItem.menu_item_id.in_(menu_item_ids),
+            Ingredient.restaurant_id == restaurant_id,
+        )
+        .all()
+    )
+    if not recipe_items:
+        return
+
+    location = get_default_consumption_location(db, restaurant_id, branch_id)
+    if location is None:
+        raise ValueError("Stock location is required before selling recipe-based items")
+
+    ordered_quantities: dict[UUID, int] = defaultdict(int)
+    for line in items:
+        ordered_quantities[line.menu_item_id] += line.quantity
+
+    required_by_ingredient: dict[UUID, Decimal] = defaultdict(lambda: Decimal("0.000"))
+    ingredients_by_id: dict[UUID, Ingredient] = {}
+    for recipe_item in recipe_items:
+        required_by_ingredient[recipe_item.ingredient_id] += (
+            Decimal(recipe_item.quantity) * ordered_quantities[recipe_item.menu_item_id]
+        )
+        ingredients_by_id[recipe_item.ingredient_id] = recipe_item.ingredient
+
+    thresholds_by_ingredient = get_thresholds_by_ingredient(db, restaurant_id, branch_id)
+    for ingredient_id, required_quantity in required_by_ingredient.items():
+        ingredient = ingredients_by_id[ingredient_id]
+        quantity_on_hand = get_stock_balance(
+            db,
+            restaurant_id,
+            branch_id,
+            ingredient_id,
+            stock_location_id=location.id,
+        )
+        if quantity_on_hand < required_quantity:
+            raise ValueError(f"Insufficient stock for ingredient '{ingredient.name}'")
+        threshold = thresholds_by_ingredient.get(ingredient_id)
+        if threshold is not None and quantity_on_hand <= threshold.critical_quantity:
+            raise ValueError(f"Ingredient '{ingredient.name}' is at critical stock level")
 
 
 def upsert_stock_threshold(

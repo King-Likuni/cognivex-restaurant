@@ -58,5 +58,8 @@ class MenuItemResponse(BaseModel):
     price: Decimal
     image_url: str | None
     is_available: bool
+    is_available_for_sale: bool = True
+    stock_status: str = "UNTRACKED"
+    stock_message: str | None = None
 
     model_config = {"from_attributes": True}

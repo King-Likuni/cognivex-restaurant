@@ -147,6 +147,9 @@ def create_pending_order(
     created_by: User | None,
 ) -> Order:
     restaurant, branch = get_active_restaurant_and_branch(db, restaurant_id, branch_id)
+    from app.inventory.service import validate_order_stock_available
+
+    validate_order_stock_available(db, restaurant_id, branch_id, items)
     subtotal, order_items = create_order_items(db, restaurant_id, items)
 
     settings = (

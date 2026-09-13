@@ -10,8 +10,7 @@ from app.auth.schemas import UserCreate
 from app.auth.service import create_user
 from app.inventory.enums import StockMovementType
 from app.inventory.models import StockMovement
-from app.orders.enums import OrderStatus
-from app.orders.models import Order, OrderStatusHistory
+from app.orders.models import Order
 
 pytestmark = pytest.mark.integration
 
@@ -250,7 +249,7 @@ def test_collecting_order_consumes_recipe_stock_and_writes_audit_log(
     assert audit_log.new_values["movements"][0]["quantity"] == "-2.500"
 
 
-def test_collecting_recipe_order_rejects_insufficient_stock_without_consumption(
+def test_creating_recipe_order_rejects_insufficient_stock_without_consumption(
     api_client: TestClient,
     db_session: Session,
     seeded_restaurant: dict[str, object],
@@ -274,34 +273,22 @@ def test_collecting_recipe_order_rejects_insufficient_stock_without_consumption(
     )
     assert recipe_response.status_code == 200, recipe_response.text
 
-    order = create_ready_order(api_client, restaurant_id, branch_id, headers, item["id"])
-    collect_response = api_client.post(
-        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+    order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
         headers=headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 2}],
+            "payment_method": "CASH",
+        },
     )
-    assert collect_response.status_code == 400
-    assert (
-        collect_response.json()["detail"] == "Insufficient stock for ingredient 'Chicken Portion'"
-    )
+    assert order_response.status_code == 400
+    assert order_response.json()["detail"] == "Insufficient stock for ingredient 'Chicken Portion'"
 
-    persisted_order = db_session.query(Order).filter(Order.id == UUID(order["id"])).one()
-    assert persisted_order.order_status == OrderStatus.READY.value
+    assert db_session.query(Order).count() == 0
     assert (
-        db_session.query(StockMovement)
-        .filter(
-            StockMovement.reference_type == "order",
-            StockMovement.reference_id == UUID(order["id"]),
-        )
-        .count()
-        == 0
+        db_session.query(StockMovement).filter(StockMovement.reference_type == "order").count() == 0
     )
-    history = (
-        db_session.query(OrderStatusHistory)
-        .filter(OrderStatusHistory.order_id == UUID(order["id"]))
-        .order_by(OrderStatusHistory.sequence)
-        .all()
-    )
-    assert history[-1].new_status == OrderStatus.READY.value
 
 
 def test_stock_thresholds_surface_low_and_critical_alerts(
@@ -420,3 +407,101 @@ def test_kitchen_can_read_low_stock_alerts_but_not_configure_thresholds(
         json={"warning_quantity": "10.000", "critical_quantity": "3.000"},
     )
     assert forbidden_response.status_code == 403
+
+
+def test_branch_menu_marks_low_and_critical_stock_items(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    headers = login(api_client, "owner@example.com", "ownerpassword")
+    ingredient, _location = create_ingredient_location_and_stock(
+        api_client,
+        restaurant_id,
+        branch_id,
+        headers,
+        quantity="4.000",
+    )
+    item = create_menu_item(api_client, restaurant_id, headers)
+
+    recipe_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/menu-items/{item['id']}/recipe-items",
+        headers=headers,
+        json={"ingredient_id": ingredient["id"], "quantity": "1.000"},
+    )
+    assert recipe_response.status_code == 200, recipe_response.text
+
+    threshold_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+        headers=headers,
+        json={"warning_quantity": "5.000", "critical_quantity": "2.000"},
+    )
+    assert threshold_response.status_code == 200, threshold_response.text
+
+    low_menu_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/menu/branches/{branch_id}/items",
+        headers=headers,
+    )
+    assert low_menu_response.status_code == 200, low_menu_response.text
+    low_item = next(row for row in low_menu_response.json() if row["id"] == item["id"])
+    assert low_item["is_available_for_sale"] is True
+    assert low_item["stock_status"] == "LOW_STOCK"
+    assert "can still be sold" in low_item["stock_message"]
+
+    wastage_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=headers,
+        json={
+            "stock_location_id": _location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.WASTAGE.value,
+            "quantity": "-2.500",
+        },
+    )
+    assert wastage_response.status_code == 201, wastage_response.text
+
+    critical_menu_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/menu/branches/{branch_id}/items",
+        headers=headers,
+    )
+    assert critical_menu_response.status_code == 200, critical_menu_response.text
+    critical_item = next(row for row in critical_menu_response.json() if row["id"] == item["id"])
+    assert critical_item["is_available_for_sale"] is False
+    assert critical_item["stock_status"] == "CRITICAL_STOCK"
+
+    cashier_order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert cashier_order_response.status_code == 400
+    assert cashier_order_response.json()["detail"] == (
+        "Ingredient 'Chicken Portion' is at critical stock level"
+    )
+
+    public_menu_response = api_client.get(
+        f"/api/v1/public/restaurants/{restaurant_id}/branches/{branch_id}/menu"
+    )
+    assert public_menu_response.status_code == 200, public_menu_response.text
+    public_item = public_menu_response.json()["categories"][0]["items"][0]
+    assert public_item["is_available_for_sale"] is False
+
+    public_order_response = api_client.post(
+        f"/api/v1/public/restaurants/{restaurant_id}/branches/{branch_id}/orders",
+        json={
+            "customer_name": "Stock Customer",
+            "customer_phone_number": "+26770001111",
+            "channel": "QR",
+            "payment_provider": "ORANGE_MONEY",
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+        },
+    )
+    assert public_order_response.status_code == 400
+    assert public_order_response.json()["detail"] == (
+        "Ingredient 'Chicken Portion' is at critical stock level"
+    )

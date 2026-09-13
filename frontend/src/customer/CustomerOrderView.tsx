@@ -102,6 +102,11 @@ export function CustomerOrderView() {
   }, [loadMenu]);
 
   function updateQuantity(menuItemId: string, quantity: number) {
+    const item = menuItems.find((candidate) => candidate.id === menuItemId);
+    if (quantity > 0 && !item?.is_available_for_sale) {
+      setError(item?.stock_message ?? "This menu item is not available right now");
+      return;
+    }
     setCart((current) => {
       const nextQuantity = Math.max(0, quantity);
       const existing = current.find((line) => line.menuItemId === menuItemId);
@@ -202,11 +207,19 @@ export function CustomerOrderView() {
                   {category.items.map((item) => {
                     const quantity = quantityFor(item);
                     return (
-                      <div className="customer-menu-row" key={item.id}>
+                      <div
+                        className={
+                          item.is_available_for_sale
+                            ? "customer-menu-row"
+                            : "customer-menu-row unavailable"
+                        }
+                        key={item.id}
+                      >
                         <div>
                           <strong>{item.name}</strong>
                           {item.description ? <span>{item.description}</span> : null}
                           <small>{formatMoney(item.price, menu.currency)}</small>
+                          {item.stock_message ? <small>{item.stock_message}</small> : null}
                         </div>
                         <div className="quantity-stepper">
                           <button
@@ -226,6 +239,7 @@ export function CustomerOrderView() {
                             className="icon-button"
                             data-testid={`customer-add-${item.id}`}
                             onClick={() => updateQuantity(item.id, quantity + 1)}
+                            disabled={!item.is_available_for_sale}
                             title="Increase quantity"
                           >
                             <Plus size={16} />

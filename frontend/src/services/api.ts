@@ -75,6 +75,9 @@ export type MenuItem = {
   price: string;
   image_url: string | null;
   is_available: boolean;
+  is_available_for_sale: boolean;
+  stock_status: string;
+  stock_message: string | null;
 };
 
 export type PublicMenuItem = Omit<MenuItem, "restaurant_id">;

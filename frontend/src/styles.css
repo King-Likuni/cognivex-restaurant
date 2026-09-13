@@ -309,11 +309,28 @@ button:disabled {
   border-color: #176b49;
 }
 
+.menu-tile.unavailable,
+.customer-menu-row.unavailable {
+  background: #f6f7f9;
+  color: #667286;
+}
+
+.menu-tile.unavailable {
+  cursor: not-allowed;
+}
+
 .menu-tile span,
+.menu-tile small,
 .cart-line span,
 .data-row span,
 .order-card p {
   color: #667286;
+}
+
+.menu-tile small {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .cart-lines,

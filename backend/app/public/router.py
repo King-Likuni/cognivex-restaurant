@@ -70,9 +70,13 @@ def get_public_menu(
     )
     currency = settings.currency if settings else "BWP"
     categories = menu_service.list_categories(db, restaurant_id)
-    items = menu_service.list_items(db, restaurant_id)
+    items_with_stock = menu_service.list_branch_items(db, restaurant_id, branch_id)
     items_by_category = {
-        category.id: [item for item in items if item.category_id == category.id]
+        category.id: [
+            (item, stock_status)
+            for item, stock_status in items_with_stock
+            if item.category_id == category.id
+        ]
         for category in categories
     }
 
@@ -96,8 +100,11 @@ def get_public_menu(
                         price=item.price,
                         image_url=item.image_url,
                         is_available=item.is_available,
+                        is_available_for_sale=stock_status.is_available_for_sale,
+                        stock_status=stock_status.stock_status,
+                        stock_message=stock_status.stock_message,
                     )
-                    for item in items_by_category[category.id]
+                    for item, stock_status in items_by_category[category.id]
                 ],
             )
             for category in categories
