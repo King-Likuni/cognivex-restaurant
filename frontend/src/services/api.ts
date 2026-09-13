@@ -235,8 +235,14 @@ export type PublicCustomerOrderResponse = {
 export type CustomerOrderStatus = {
   order_id: string;
   display_number: string;
+  payment_reference: string;
+  payment_provider: string | null;
   payment_status: string;
   order_status: string;
+  stage_label: string;
+  message: string;
+  collection_instruction: string | null;
+  payment_reference_required: boolean;
   updated_at: string | null;
 };
 

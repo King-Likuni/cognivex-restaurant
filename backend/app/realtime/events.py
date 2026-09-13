@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from uuid import UUID
 
+from app.notifications.service import record_customer_notification_event
 from app.orders.models import Order
 
 Channel = str
@@ -95,3 +96,4 @@ def publish_order_event(order: Order, event_type: str) -> None:
         },
         event,
     )
+    record_customer_notification_event(order, event_type)

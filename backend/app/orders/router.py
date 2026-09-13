@@ -11,6 +11,13 @@ from app.core.database import get_db
 from app.core.dependencies import ensure_restaurant_access, require_branch_access, require_cashier
 from app.core.security import create_access_token, decode_access_token
 from app.orders import service
+from app.orders.customer_status import (
+    get_collection_instruction,
+    get_customer_stage_label,
+    get_customer_status_message,
+    get_customer_status_updated_at,
+    payment_proof_required,
+)
 from app.orders.enums import OrderStatus
 from app.orders.schemas import (
     CashierOrderCreate,
@@ -118,9 +125,15 @@ def get_customer_order_status(
     return CustomerOrderStatusResponse(
         order_id=order.id,
         display_number=order.display_number,
+        payment_reference=order.payment_reference,
+        payment_provider=order.payment_provider,
         payment_status=order.payment_status,
         order_status=order.order_status,
-        updated_at=order.collected_at or order.ready_at or order.preparing_at or order.confirmed_at,
+        stage_label=get_customer_stage_label(order),
+        message=get_customer_status_message(order),
+        collection_instruction=get_collection_instruction(order),
+        payment_reference_required=payment_proof_required(order),
+        updated_at=get_customer_status_updated_at(order),
     )
 
 

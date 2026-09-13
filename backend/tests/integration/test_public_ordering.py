@@ -119,7 +119,14 @@ def test_public_menu_and_qr_order_flow(api_client, db_session, seeded_restaurant
         params={"token": payload["status_token"]["access_token"]},
     )
     assert status_response.status_code == 200, status_response.text
-    assert status_response.json()["display_number"] == payload["order"]["display_number"]
+    customer_status = status_response.json()
+    assert customer_status["display_number"] == payload["order"]["display_number"]
+    assert customer_status["payment_reference"] == payload["order"]["payment_reference"]
+    assert customer_status["stage_label"] == "Queued"
+    assert customer_status["payment_reference_required"] is False
+    assert customer_status["message"] == (
+        "Your order is moving through the kitchen. Keep your payment proof ready for collection."
+    )
 
 
 def test_public_whatsapp_channel_order_flow(api_client, db_session, seeded_restaurant):
@@ -192,6 +199,22 @@ def test_public_order_can_be_prepared_before_transfer_confirmation(
     )
     assert ready_response.status_code == 200, ready_response.text
     assert ready_response.json()["payment_status"] == PaymentStatus.PENDING.value
+
+    ready_status_response = api_client.get(
+        (
+            f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}/orders/"
+            f"{order['id']}/customer-status"
+        ),
+        params={"token": payload["status_token"]["access_token"]},
+    )
+    assert ready_status_response.status_code == 200, ready_status_response.text
+    ready_status = ready_status_response.json()
+    assert ready_status["order_status"] == OrderStatus.READY.value
+    assert ready_status["payment_reference"] == order["payment_reference"]
+    assert ready_status["payment_reference_required"] is True
+    assert ready_status["collection_instruction"] == (
+        "Give the cashier your order number and payment reference from your phone."
+    )
 
     unpaid_collect_response = api_client.post(
         f"/api/v1/restaurants/{restaurant.id}/branches/{branch.id}/orders/{order['id']}/collect",

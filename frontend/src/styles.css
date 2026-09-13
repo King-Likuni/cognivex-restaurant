@@ -815,6 +815,43 @@ button:disabled {
   font-size: 18px;
 }
 
+.customer-stage-label {
+  color: #17202e;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.customer-reference-panel {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 340px);
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #f7f9fb;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.customer-reference-panel span,
+.customer-reference-panel strong {
+  display: block;
+}
+
+.customer-reference-panel span {
+  color: #526071;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.customer-reference-panel strong {
+  overflow-wrap: anywhere;
+  color: #17202e;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
 .status-steps {
   display: grid;
   width: 100%;
@@ -839,6 +876,12 @@ button:disabled {
   border-color: #b7dec7;
   background: #edf8f1;
   color: #176b49;
+}
+
+.status-step.complete {
+  border-color: #bfd0e4;
+  background: #f0f5fb;
+  color: #27527f;
 }
 
 .status-pill,

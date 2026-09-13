@@ -81,8 +81,14 @@ class OrderStatusTokenResponse(BaseModel):
 class CustomerOrderStatusResponse(BaseModel):
     order_id: UUID
     display_number: str
+    payment_reference: str
+    payment_provider: str | None
     payment_status: str
     order_status: str
+    stage_label: str
+    message: str
+    collection_instruction: str | None
+    payment_reference_required: bool
     updated_at: datetime | None
 
 

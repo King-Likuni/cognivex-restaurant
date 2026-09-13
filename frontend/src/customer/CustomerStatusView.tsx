@@ -1,4 +1,11 @@
-import { CheckCircle2, ChefHat, Clock3, PackageCheck, ReceiptText } from "lucide-react";
+import {
+  CheckCircle2,
+  ChefHat,
+  Clock3,
+  CreditCard,
+  PackageCheck,
+  ReceiptText,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { EmptyState, Notice, Panel } from "../components/ui";
@@ -22,15 +29,12 @@ function readCustomerRoute() {
   };
 }
 
-function statusCopy(status: string, paymentStatus?: string) {
-  if (paymentStatus && paymentStatus !== "PAID" && status !== "PENDING_PAYMENT") {
-    return "Your order is moving through the kitchen. Keep your payment proof ready for collection.";
-  }
+function fallbackStatusCopy(status: string) {
   if (status === "PENDING_PAYMENT") {
-    return "Payment is being confirmed";
+    return "Your order was received and will continue through the kitchen.";
   }
   if (status === "QUEUED") {
-    return "Your order is in the kitchen queue";
+    return "Your order is moving through the kitchen. Keep your payment proof ready for collection.";
   }
   if (status === "PREPARING") {
     return "The kitchen is preparing your order";
@@ -45,6 +49,12 @@ function statusCopy(status: string, paymentStatus?: string) {
     return "Your order was marked uncollected";
   }
   return "Waiting for the latest order update";
+}
+
+function stageIndex(orderStatus: string) {
+  const order = ["QUEUED", "PREPARING", "READY", "COLLECTED"];
+  const index = order.indexOf(orderStatus);
+  return index === -1 ? 0 : index;
 }
 
 export function CustomerStatusView() {
@@ -90,16 +100,10 @@ export function CustomerStatusView() {
       }
       const orderEvent = event as RealtimeEvent;
       setEvents((current) => [orderEvent, ...current].slice(0, 5));
-      setStatus({
-        order_id: orderEvent.order_id,
-        display_number: orderEvent.display_number,
-        payment_status: orderEvent.payment_status,
-        order_status: orderEvent.order_status,
-        updated_at: orderEvent.occurred_at,
-      });
+      void loadStatus();
     };
     return () => socket.close();
-  }, [route.orderId, route.token]);
+  }, [loadStatus, route.orderId, route.token]);
 
   return (
     <main className="customer-status-page">
@@ -113,7 +117,21 @@ export function CustomerStatusView() {
             </span>
             <ReceiptText size={40} />
             <h1>{status.display_number}</h1>
-            <p>{statusCopy(status.order_status, status.payment_status)}</p>
+            <span className="customer-stage-label">{status.stage_label}</span>
+            <p>{status.message}</p>
+            <div className="customer-reference-panel">
+              <CreditCard size={18} />
+              <div>
+                <span>Payment reference</span>
+                <strong>{status.payment_reference}</strong>
+              </div>
+            </div>
+            {status.payment_reference_required ? (
+              <Notice tone="info">
+                {status.collection_instruction ??
+                  "Show your proof of payment with this reference at the counter."}
+              </Notice>
+            ) : null}
             <div className="status-steps" aria-label="Order progress">
               {[
                 { key: "QUEUED", label: "Queued", icon: Clock3 },
@@ -123,8 +141,18 @@ export function CustomerStatusView() {
               ].map((step) => {
                 const Icon = step.icon;
                 const active = step.key === status.order_status;
+                const completed = stageIndex(step.key) < stageIndex(status.order_status);
                 return (
-                  <span className={active ? "status-step active" : "status-step"} key={step.key}>
+                  <span
+                    className={[
+                      "status-step",
+                      active ? "active" : "",
+                      completed ? "complete" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={step.key}
+                  >
                     <Icon size={16} />
                     {step.label}
                   </span>
@@ -141,7 +169,7 @@ export function CustomerStatusView() {
           {events.map((event) => (
             <div className="event-row" key={`${event.type}-${event.occurred_at}`}>
               <strong>{event.display_number}</strong>
-              <span>{statusCopy(event.order_status, event.payment_status)}</span>
+              <span>{fallbackStatusCopy(event.order_status)}</span>
             </div>
           ))}
           {!events.length ? <EmptyState>Updates will appear here automatically</EmptyState> : null}
