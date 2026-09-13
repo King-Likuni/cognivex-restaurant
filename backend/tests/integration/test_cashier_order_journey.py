@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.schemas import UserCreate
 from app.auth.service import create_user
+from app.inventory.enums import StockMovementType
 
 pytestmark = pytest.mark.integration
 
@@ -497,6 +498,73 @@ def test_cashier_and_kitchen_share_branch_order_workflow_without_admin_surfaces(
     )
     assert collect_response.status_code == 200, collect_response.text
     assert collect_response.json()["order_status"] == "COLLECTED"
+
+    cashier_report_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
+        headers=cashier_headers,
+        params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+    )
+    assert cashier_report_response.status_code == 200, cashier_report_response.text
+    assert cashier_report_response.json()["revenue"] == "55.00"
+
+    no_branch_report_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
+        headers=cashier_headers,
+        params={"business_date": date.today().isoformat()},
+    )
+    assert no_branch_report_response.status_code == 403
+
+    cashier_audit_export_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/reports/exports/audit-logs.csv",
+        headers=cashier_headers,
+        params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+    )
+    assert cashier_audit_export_response.status_code == 403
+
+    ingredient_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/ingredients",
+        headers=owner_headers,
+        json={"name": "Cashier Visible Stock", "unit": "portion"},
+    )
+    assert ingredient_response.status_code == 201, ingredient_response.text
+    ingredient = ingredient_response.json()
+    location_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/locations",
+        headers=owner_headers,
+        json={"name": "Cashier Visible Location"},
+    )
+    assert location_response.status_code == 201, location_response.text
+    location = location_response.json()
+    stock_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=owner_headers,
+        json={
+            "stock_location_id": location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.RECEIVED.value,
+            "quantity": "10.000",
+        },
+    )
+    assert stock_response.status_code == 201, stock_response.text
+
+    inventory_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/balances",
+        headers=cashier_headers,
+    )
+    assert inventory_response.status_code == 200, inventory_response.text
+    assert ingredient["id"] in {balance["ingredient_id"] for balance in inventory_response.json()}
+
+    cashier_receive_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=cashier_headers,
+        json={
+            "stock_location_id": location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.RECEIVED.value,
+            "quantity": "5.000",
+        },
+    )
+    assert cashier_receive_response.status_code == 403
 
     forbidden_checks = [
         api_client.get(

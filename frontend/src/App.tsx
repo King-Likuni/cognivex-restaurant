@@ -68,7 +68,7 @@ const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
   ADMIN: ["branches", "staff", "audit"],
   OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
-  CASHIER: ["cashier", "kitchen"],
+  CASHIER: ["cashier", "kitchen", "inventory", "dashboard"],
   KITCHEN: ["cashier", "kitchen"],
   INVENTORY: ["inventory"],
 };
@@ -338,7 +338,7 @@ function OperationsApp() {
               <InventoryView context={context} token={token} roleName={session.user.role_name} />
             ) : null}
             {view === "dashboard" && visibleNavItems.some((item) => item.key === "dashboard") ? (
-              <DashboardView context={context} token={token} />
+              <DashboardView context={context} token={token} roleName={session.user.role_name} />
             ) : null}
             {view === "branches" && visibleNavItems.some((item) => item.key === "branches") ? (
               <BranchManagementView

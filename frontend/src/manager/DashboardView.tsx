@@ -3,18 +3,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AppContext } from "../App";
 import { EmptyState, Field, Notice, Panel, Stat } from "../components/ui";
-import { apiRequest, downloadApiFile, type DailySalesReport } from "../services/api";
+import { apiRequest, downloadApiFile, type DailySalesReport, type RoleName } from "../services/api";
 import { formatMoney } from "../services/format";
 
 type Props = {
   context: AppContext;
   token: string;
+  roleName: RoleName | null;
 };
 
-export function DashboardView({ context, token }: Props) {
+export function DashboardView({ context, token, roleName }: Props) {
   const [businessDate, setBusinessDate] = useState("");
   const [report, setReport] = useState<DailySalesReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const canExportAudit = roleName === "OWNER" || roleName === "MANAGER";
 
   const loadReport = useCallback(async () => {
     setError(null);
@@ -113,7 +115,7 @@ export function DashboardView({ context, token }: Props) {
   return (
     <div className="view-stack">
       <Panel
-        title="Owner Report"
+        title={roleName === "CASHIER" ? "Branch Dashboard" : "Owner Report"}
         action={
           <div className="button-row">
             <button className="secondary-action" type="button" onClick={loadReport}>
@@ -315,19 +317,21 @@ export function DashboardView({ context, token }: Props) {
                   <Download size={17} />
                   Payments
                 </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() =>
-                    void downloadExport(
-                      `/api/v1/restaurants/${context.restaurant.id}/reports/exports/audit-logs.csv`,
-                      `cognivex-audit-logs-${businessDate || report.business_date}.csv`,
-                    )
-                  }
-                >
-                  <Download size={17} />
-                  Audit Logs
-                </button>
+                {canExportAudit ? (
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() =>
+                      void downloadExport(
+                        `/api/v1/restaurants/${context.restaurant.id}/reports/exports/audit-logs.csv`,
+                        `cognivex-audit-logs-${businessDate || report.business_date}.csv`,
+                      )
+                    }
+                  >
+                    <Download size={17} />
+                    Audit Logs
+                  </button>
+                ) : null}
                 <button
                   className="secondary-action"
                   type="button"

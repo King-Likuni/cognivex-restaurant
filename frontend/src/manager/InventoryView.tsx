@@ -42,6 +42,7 @@ export function InventoryView({ context, token, roleName }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canManageInventory = roleName === "OWNER" || roleName === "MANAGER";
+  const canReceiveStock = canManageInventory || roleName === "INVENTORY";
 
   const loadInventory = useCallback(async () => {
     setError(null);
@@ -318,34 +319,36 @@ export function InventoryView({ context, token, roleName }: Props) {
       </div>
 
       <div className="view-stack">
-        <Panel title="Receive Stock">
-          <form className="compact-form" onSubmit={receiveStock}>
-            <Field label="Ingredient">
-              <select
-                value={recipeIngredientId}
-                onChange={(event) => setRecipeIngredientId(event.target.value)}
-              >
-                {ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.id}>
-                    {ingredient.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Quantity">
-              <input
-                type="number"
-                step="0.001"
-                value={stockQuantity}
-                onChange={(event) => setStockQuantity(event.target.value)}
-              />
-            </Field>
-            <button className="primary-action" type="submit">
-              <Plus size={18} />
-              Receive
-            </button>
-          </form>
-        </Panel>
+        {canReceiveStock ? (
+          <Panel title="Receive Stock">
+            <form className="compact-form" onSubmit={receiveStock}>
+              <Field label="Ingredient">
+                <select
+                  value={recipeIngredientId}
+                  onChange={(event) => setRecipeIngredientId(event.target.value)}
+                >
+                  {ingredients.map((ingredient) => (
+                    <option key={ingredient.id} value={ingredient.id}>
+                      {ingredient.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Quantity">
+                <input
+                  type="number"
+                  step="0.001"
+                  value={stockQuantity}
+                  onChange={(event) => setStockQuantity(event.target.value)}
+                />
+              </Field>
+              <button className="primary-action" type="submit">
+                <Plus size={18} />
+                Receive
+              </button>
+            </form>
+          </Panel>
+        ) : null}
 
         {canManageInventory ? (
           <>

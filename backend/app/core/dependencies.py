@@ -89,6 +89,7 @@ require_manager = RoleChecker(["OWNER", "MANAGER"])
 require_cashier = RoleChecker(shared_order_roles)
 require_kitchen = RoleChecker(shared_order_roles)
 require_inventory = RoleChecker(["OWNER", "MANAGER", "INVENTORY"])
+require_inventory_reader = RoleChecker(["OWNER", "MANAGER", "CASHIER", "INVENTORY"])
 require_admin = RoleChecker(["ADMIN"])
 
 

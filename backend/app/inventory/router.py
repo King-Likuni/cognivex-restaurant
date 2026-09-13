@@ -12,6 +12,7 @@ from app.core.dependencies import (
     ensure_restaurant_access,
     require_branch_access,
     require_inventory,
+    require_inventory_reader,
     require_manager,
 )
 from app.inventory import service
@@ -34,7 +35,9 @@ from app.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/restaurants/{restaurant_id}/inventory", tags=["Inventory"])
-require_inventory_alert_reader = RoleChecker(["OWNER", "MANAGER", "KITCHEN", "INVENTORY"])
+require_inventory_alert_reader = RoleChecker(
+    ["OWNER", "MANAGER", "CASHIER", "KITCHEN", "INVENTORY"]
+)
 
 
 def recipe_response(recipe_item) -> RecipeItemResponse:
@@ -83,7 +86,7 @@ def create_ingredient(
 def list_ingredients(
     restaurant_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_inventory),
+    current_user: User = Depends(require_inventory_reader),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
     return service.list_ingredients(db, restaurant_id)
@@ -134,7 +137,7 @@ def list_stock_locations(
     restaurant_id: UUID,
     branch_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_inventory),
+    current_user: User = Depends(require_inventory_reader),
     branch_user: User = Depends(require_branch_access),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
@@ -283,7 +286,7 @@ def list_stock_balances(
     branch_id: UUID,
     stock_location_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_inventory),
+    current_user: User = Depends(require_inventory_reader),
     branch_user: User = Depends(require_branch_access),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
