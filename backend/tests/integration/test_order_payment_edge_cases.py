@@ -62,6 +62,7 @@ def create_cashier_order(
     menu_item_id: str,
     *,
     quantity: int = 1,
+    payment_method: str = "CASH",
 ) -> dict[str, str]:
     order_response = client.post(
         f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
@@ -69,7 +70,7 @@ def create_cashier_order(
         json={
             "customer_id": None,
             "items": [{"menu_item_id": menu_item_id, "quantity": quantity}],
-            "payment_method": "CASH",
+            "payment_method": payment_method,
         },
     )
     assert order_response.status_code == 201, order_response.text
@@ -136,6 +137,91 @@ def test_kitchen_cannot_start_unpaid_order(
         start_response.json()["detail"]
         == "Cannot transition order from PENDING_PAYMENT to PREPARING"
     )
+
+
+def test_cashier_order_cannot_be_collected_before_verified_payment(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    item = create_menu_item(api_client, restaurant_id, owner_headers)
+    order = create_cashier_order(api_client, restaurant_id, branch_id, owner_headers, item["id"])
+
+    collect_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+        headers=owner_headers,
+    )
+
+    assert collect_response.status_code == 400
+    assert collect_response.json()["detail"] == "Only paid orders can be collected"
+
+
+def test_cashier_transfer_order_requires_matching_reference_before_collection(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    item = create_menu_item(api_client, restaurant_id, owner_headers, name="Transfer Meal")
+    order = create_cashier_order(
+        api_client,
+        restaurant_id,
+        branch_id,
+        owner_headers,
+        item["id"],
+        payment_method="PAY2CELL",
+    )
+    assert order["order_status"] == "QUEUED"
+    assert order["payment_status"] == "PENDING"
+    assert order["payment_provider"] == "PAY2CELL"
+
+    start_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=owner_headers,
+    )
+    assert start_response.status_code == 200, start_response.text
+    ready_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/ready",
+        headers=owner_headers,
+    )
+    assert ready_response.status_code == 200, ready_response.text
+
+    early_collect_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+        headers=owner_headers,
+    )
+    assert early_collect_response.status_code == 400
+    assert early_collect_response.json()["detail"] == "Only paid orders can be collected"
+
+    wrong_reference_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
+        headers=owner_headers,
+        json={"amount_received": "55.00", "payment_reference_used": "WRONG-REFERENCE"},
+    )
+    assert wrong_reference_response.status_code == 400
+    assert (
+        wrong_reference_response.json()["detail"] == "Payment reference does not match this order"
+    )
+
+    payment_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/mobile-transfer/confirm",
+        headers=owner_headers,
+        json={
+            "amount_received": "55.00",
+            "payment_reference_used": order["payment_reference"],
+        },
+    )
+    assert payment_response.status_code == 201, payment_response.text
+
+    collect_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+        headers=owner_headers,
+    )
+    assert collect_response.status_code == 200, collect_response.text
+    assert collect_response.json()["order_status"] == "COLLECTED"
 
 
 def test_sold_out_item_cannot_be_ordered(

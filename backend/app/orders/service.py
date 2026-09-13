@@ -246,10 +246,12 @@ def create_cashier_order(
         if customer is None:
             raise ValueError("Customer not found")
 
-    if data.payment_method.upper() != "CASH":
-        raise ValueError("Only CASH cashier payments are implemented in this slice")
+    payment_method = data.payment_method.strip().upper()
+    allowed_payment_methods = {"CASH", "ORANGE_MONEY", "PAY2CELL"}
+    if payment_method not in allowed_payment_methods:
+        raise ValueError("Payment method must be CASH, ORANGE_MONEY, or PAY2CELL")
 
-    return create_pending_order(
+    order = create_pending_order(
         db,
         restaurant_id=restaurant_id,
         branch_id=branch_id,
@@ -258,6 +260,19 @@ def create_cashier_order(
         channel=OrderChannel.CASHIER.value,
         created_by=created_by,
     )
+    if payment_method == "CASH":
+        return order
+
+    from app.payments import service as payment_service
+
+    payment_service.initiate_payment(
+        db,
+        restaurant_id,
+        order.id,
+        payment_method,
+        created_by,
+    )
+    return get_order(db, restaurant_id, branch_id, order.id) or order
 
 
 def create_customer_order(

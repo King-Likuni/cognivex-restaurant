@@ -543,6 +543,36 @@ button:disabled {
   font-size: 24px;
 }
 
+.payment-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.payment-method-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid #cfd7e2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #263244;
+  font-weight: 700;
+}
+
+.payment-method-option:hover {
+  border-color: #9fb0c3;
+  background: #f7f9fb;
+}
+
+.payment-method-option.active {
+  border-color: #176b49;
+  background: #edf6f1;
+  color: #176b49;
+}
+
 .result-card,
 .order-card {
   display: grid;

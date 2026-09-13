@@ -42,12 +42,23 @@ type CustomerStatusLink = {
 };
 
 type RemotePaymentProvider = "ORANGE_MONEY" | "PAY2CELL";
+type CashierPaymentMethod = "CASH" | RemotePaymentProvider;
 
 type MobileTransferConfirmation = {
   orderId: string;
   amountReceived: string;
   paymentReferenceUsed: string;
 };
+
+const CASHIER_PAYMENT_METHODS: {
+  value: CashierPaymentMethod;
+  label: string;
+  icon: typeof Banknote;
+}[] = [
+  { value: "CASH", label: "Cash", icon: Banknote },
+  { value: "ORANGE_MONEY", label: "Orange Money", icon: CreditCard },
+  { value: "PAY2CELL", label: "Pay2Cell", icon: CreditCard },
+];
 
 const CLOSED_ORDER_STATUSES = new Set([
   "COLLECTED",
@@ -114,8 +125,8 @@ export function CashierView({ context, token }: Props) {
   const [readyOrders, setReadyOrders] = useState<Order[]>([]);
   const [uncollectedOrders, setUncollectedOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<CashierPaymentMethod>("CASH");
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
-  const [remotePayment, setRemotePayment] = useState<Payment | null>(null);
   const [customerStatusLink, setCustomerStatusLink] = useState<CustomerStatusLink | null>(null);
   const [mobileTransferConfirmation, setMobileTransferConfirmation] =
     useState<MobileTransferConfirmation | null>(null);
@@ -142,8 +153,8 @@ export function CashierView({ context, token }: Props) {
 
   useEffect(() => {
     setCart([]);
+    setPaymentMethod("CASH");
     setLastOrder(null);
-    setRemotePayment(null);
     setCustomerStatusLink(null);
     setMobileTransferConfirmation(null);
   }, [context.restaurant.id, context.branch.id]);
@@ -252,15 +263,18 @@ export function CashierView({ context, token }: Props) {
               menu_item_id: line.menuItemId,
               quantity: line.quantity,
             })),
-            payment_method: "CASH",
+            payment_method: paymentMethod,
           },
         },
       );
       setLastOrder(order);
-      setRemotePayment(null);
       void createCustomerStatusLink(order);
       setCart([]);
-      setNotice(`Created ${order.display_number}`);
+      setNotice(
+        paymentMethod === "CASH"
+          ? `Created ${order.display_number}. Confirm cash before kitchen starts.`
+          : `Created ${order.display_number}. ${formatProvider(paymentMethod)} reference is ready for customer payment.`,
+      );
       await loadOrderDesk();
     } catch (caught) {
       setError(cashierErrorMessage(caught, "Could not create order"));
@@ -314,31 +328,6 @@ export function CashierView({ context, token }: Props) {
       return;
     }
     await confirmCashPayment(lastOrder);
-  }
-
-  async function initiateRemotePayment(order: Order, provider: RemotePaymentProvider) {
-    setIsBusy(true);
-    setError(null);
-    try {
-      const payment = await apiRequest<Payment>(
-        `/api/v1/restaurants/${context.restaurant.id}/orders/${order.id}/payments`,
-        {
-          method: "POST",
-          token,
-          body: { provider, customer_phone_number: "+26770000000" },
-        },
-      );
-      if (lastOrder?.id === order.id) {
-        setLastOrder({ ...order, payment_provider: payment.provider });
-        setRemotePayment(payment);
-      }
-      setNotice(`${formatProvider(provider)} payment initiated`);
-      await loadOrderDesk();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not initiate payment");
-    } finally {
-      setIsBusy(false);
-    }
   }
 
   async function updatePickup(order: Order, action: "collect" | "uncollected") {
@@ -505,6 +494,27 @@ export function CashierView({ context, token }: Props) {
             <span>Total</span>
             <strong data-testid="cart-total">{formatMoney(cartTotal)}</strong>
           </div>
+          <div className="payment-method-grid" role="group" aria-label="Payment method">
+            {CASHIER_PAYMENT_METHODS.map((method) => {
+              const Icon = method.icon;
+              return (
+                <button
+                  className={
+                    method.value === paymentMethod
+                      ? "payment-method-option active"
+                      : "payment-method-option"
+                  }
+                  key={method.value}
+                  type="button"
+                  onClick={() => setPaymentMethod(method.value)}
+                  aria-pressed={method.value === paymentMethod}
+                >
+                  <Icon size={17} />
+                  {method.label}
+                </button>
+              );
+            })}
+          </div>
           <button className="primary-action" type="button" onClick={createOrder} disabled={isBusy}>
             <Plus size={18} />
             Create order
@@ -517,33 +527,22 @@ export function CashierView({ context, token }: Props) {
               <p>Reference is hidden. Enter it only from the customer proof of payment.</p>
               {canCancelOrder(lastOrder) ? (
                 <div className="button-row">
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={confirmCash}
-                    disabled={isBusy}
-                  >
-                    <Banknote size={17} />
-                    Cash paid
-                  </button>
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={() => void initiateRemotePayment(lastOrder, "ORANGE_MONEY")}
-                    disabled={isBusy}
-                  >
-                    <CreditCard size={17} />
-                    Orange Money
-                  </button>
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={() => void initiateRemotePayment(lastOrder, "PAY2CELL")}
-                    disabled={isBusy}
-                  >
-                    <CreditCard size={17} />
-                    Pay2Cell
-                  </button>
+                  {lastOrder.payment_provider ? (
+                    <button className="secondary-action" type="button" disabled>
+                      <Clock3 size={17} />
+                      Waiting for proof
+                    </button>
+                  ) : (
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={confirmCash}
+                      disabled={isBusy}
+                    >
+                      <Banknote size={17} />
+                      Cash paid
+                    </button>
+                  )}
                   <button
                     className="secondary-action danger-action"
                     type="button"
@@ -565,10 +564,10 @@ export function CashierView({ context, token }: Props) {
                   </button>
                 </div>
               ) : null}
-              {remotePayment ? (
+              {lastOrder.payment_provider ? (
                 <Notice>
-                  {formatProvider(remotePayment.provider)} transfer started. Confirm it from the
-                  Payment Queue when the customer shows proof.
+                  {formatProvider(lastOrder.payment_provider)} proof can be confirmed only after
+                  the kitchen marks this order ready.
                 </Notice>
               ) : null}
             </div>
@@ -691,24 +690,6 @@ export function CashierView({ context, token }: Props) {
                     >
                       <Banknote size={17} />
                       Cash paid
-                    </button>
-                    <button
-                      className="secondary-action"
-                      type="button"
-                      onClick={() => void initiateRemotePayment(order, "ORANGE_MONEY")}
-                      disabled={isBusy}
-                    >
-                      <CreditCard size={17} />
-                      Orange Money
-                    </button>
-                    <button
-                      className="secondary-action"
-                      type="button"
-                      onClick={() => void initiateRemotePayment(order, "PAY2CELL")}
-                      disabled={isBusy}
-                    >
-                      <CreditCard size={17} />
-                      Pay2Cell
                     </button>
                   </>
                 )}
