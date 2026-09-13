@@ -42,7 +42,7 @@ type NewStaffForm = StaffDraft & {
 
 type StaffRole = Exclude<RoleName, "ADMIN">;
 
-const STAFF_ROLES: StaffRole[] = ["OWNER", "MANAGER", "CASHIER", "KITCHEN"];
+const STAFF_ROLES: StaffRole[] = ["OWNER", "MANAGER", "CASHIER", "KITCHEN", "INVENTORY"];
 
 const DEFAULT_NEW_STAFF: NewStaffForm = {
   email: "",
@@ -62,7 +62,7 @@ function draftFromUser(user: User): StaffDraft {
 }
 
 function requiresBranchAssignment(roleName: StaffRole) {
-  return roleName === "CASHIER" || roleName === "KITCHEN";
+  return roleName === "CASHIER" || roleName === "KITCHEN" || roleName === "INVENTORY";
 }
 
 function workerName(user: User) {
@@ -136,6 +136,9 @@ function roleSummary(roleName: RoleName | null) {
   }
   if (roleName === "KITCHEN") {
     return "Kitchen board and stock alerts for assigned branches only.";
+  }
+  if (roleName === "INVENTORY") {
+    return "Stock receiving, balances, and low-stock alerts for assigned branches only.";
   }
   return "No operational console access.";
 }
@@ -220,7 +223,9 @@ export function StaffManagementView({ context, token, branches }: Props) {
 
   function validateStaffPayload(roleName: StaffRole, branchIds: string[]) {
     if (requiresBranchAssignment(roleName) && branchIds.length === 0) {
-      setError("Cashier and kitchen users must be assigned to at least one active branch");
+      setError(
+        "Cashier, kitchen, and inventory users must be assigned to at least one active branch",
+      );
       return false;
     }
     return true;

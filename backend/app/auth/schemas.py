@@ -19,7 +19,10 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8)
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
-    role_name: str = Field(..., description="One of: OWNER, MANAGER, CASHIER, KITCHEN")
+    role_name: str = Field(
+        ...,
+        description="One of: OWNER, MANAGER, CASHIER, KITCHEN, INVENTORY",
+    )
     restaurant_id: UUID | None = None
     branch_ids: list[UUID] = Field(default_factory=list)
 
@@ -29,7 +32,7 @@ class UserUpdate(BaseModel):
     last_name: str | None = Field(default=None, min_length=1, max_length=100)
     role_name: str | None = Field(
         default=None,
-        description="One of: OWNER, MANAGER, CASHIER, KITCHEN",
+        description="One of: OWNER, MANAGER, CASHIER, KITCHEN, INVENTORY",
     )
     branch_ids: list[UUID] | None = None
     is_active: bool | None = None
@@ -39,7 +42,10 @@ class StaffInviteCreate(BaseModel):
     email: EmailStr
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
-    role_name: str = Field(..., description="One of: OWNER, MANAGER, CASHIER, KITCHEN")
+    role_name: str = Field(
+        ...,
+        description="One of: OWNER, MANAGER, CASHIER, KITCHEN, INVENTORY",
+    )
     restaurant_id: UUID | None = None
     branch_ids: list[UUID] = Field(default_factory=list)
 

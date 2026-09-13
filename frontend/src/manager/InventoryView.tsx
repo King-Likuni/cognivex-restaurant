@@ -9,6 +9,7 @@ import {
   type LowStockAlert,
   type MenuItem,
   type RecipeItem,
+  type RoleName,
   type StockBalance,
   type StockLocation,
   type StockThreshold,
@@ -17,9 +18,10 @@ import {
 type Props = {
   context: AppContext;
   token: string;
+  roleName: RoleName | null;
 };
 
-export function InventoryView({ context, token }: Props) {
+export function InventoryView({ context, token, roleName }: Props) {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -39,36 +41,42 @@ export function InventoryView({ context, token }: Props) {
   const [recipeQuantity, setRecipeQuantity] = useState("1.000");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const canManageInventory = roleName === "OWNER" || roleName === "MANAGER";
 
   const loadInventory = useCallback(async () => {
     setError(null);
     try {
-      const [nextIngredients, nextLocations, nextItems, nextBalances, nextThresholds, nextAlerts] =
-        await Promise.all([
-          apiRequest<Ingredient[]>(
-            `/api/v1/restaurants/${context.restaurant.id}/inventory/ingredients`,
-            {
-              token,
-            },
-          ),
+      const [nextIngredients, nextLocations, nextBalances, nextAlerts] = await Promise.all([
+        apiRequest<Ingredient[]>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/ingredients`,
+          {
+            token,
+          },
+        ),
         apiRequest<StockLocation[]>(
           `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/locations`,
           { token },
         ),
-        apiRequest<MenuItem[]>(`/api/v1/restaurants/${context.restaurant.id}/menu/items`, { token }),
         apiRequest<StockBalance[]>(
           `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/balances`,
           { token },
         ),
-          apiRequest<StockThreshold[]>(
-            `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/thresholds`,
-            { token },
-          ),
-          apiRequest<LowStockAlert[]>(
-            `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/low-stock-alerts`,
-            { token },
-          ),
-        ]);
+        apiRequest<LowStockAlert[]>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/low-stock-alerts`,
+          { token },
+        ),
+      ]);
+      const [nextItems, nextThresholds] = canManageInventory
+        ? await Promise.all([
+            apiRequest<MenuItem[]>(`/api/v1/restaurants/${context.restaurant.id}/menu/items`, {
+              token,
+            }),
+            apiRequest<StockThreshold[]>(
+              `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/thresholds`,
+              { token },
+            ),
+          ])
+        : [[], []];
       setIngredients(nextIngredients);
       setLocations(nextLocations);
       setMenuItems(nextItems);
@@ -81,10 +89,10 @@ export function InventoryView({ context, token }: Props) {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load inventory");
     }
-  }, [context.branch.id, context.restaurant.id, token]);
+  }, [canManageInventory, context.branch.id, context.restaurant.id, token]);
 
   const loadRecipe = useCallback(async (menuItemId: string) => {
-    if (!menuItemId) {
+    if (!canManageInventory || !menuItemId) {
       setRecipeItems([]);
       return;
     }
@@ -93,7 +101,7 @@ export function InventoryView({ context, token }: Props) {
       { token },
     );
     setRecipeItems(items);
-  }, [context.restaurant.id, token]);
+  }, [canManageInventory, context.restaurant.id, token]);
 
   useEffect(() => {
     void loadInventory();
@@ -253,22 +261,24 @@ export function InventoryView({ context, token }: Props) {
             </button>
           }
         >
-          <form className="compact-form" onSubmit={createIngredient}>
-            <Field label="Name">
-              <input
-                value={ingredientName}
-                onChange={(event) => setIngredientName(event.target.value)}
-                placeholder="Chicken Portion"
-              />
-            </Field>
-            <Field label="Unit">
-              <input value={unit} onChange={(event) => setUnit(event.target.value)} />
-            </Field>
-            <button className="primary-action" type="submit">
-              <Plus size={18} />
-              Add ingredient
-            </button>
-          </form>
+          {canManageInventory ? (
+            <form className="compact-form" onSubmit={createIngredient}>
+              <Field label="Name">
+                <input
+                  value={ingredientName}
+                  onChange={(event) => setIngredientName(event.target.value)}
+                  placeholder="Chicken Portion"
+                />
+              </Field>
+              <Field label="Unit">
+                <input value={unit} onChange={(event) => setUnit(event.target.value)} />
+              </Field>
+              <button className="primary-action" type="submit">
+                <Plus size={18} />
+                Add ingredient
+              </button>
+            </form>
+          ) : null}
           <div className="data-list">
             {ingredients.map((ingredient) => (
               <div className="data-row" key={ingredient.id}>
@@ -281,15 +291,20 @@ export function InventoryView({ context, token }: Props) {
         </Panel>
 
         <Panel title="Stock Locations">
-          <form className="compact-form" onSubmit={createLocation}>
-            <Field label="Location">
-              <input value={locationName} onChange={(event) => setLocationName(event.target.value)} />
-            </Field>
-            <button className="primary-action" type="submit">
-              <Boxes size={18} />
-              Add location
-            </button>
-          </form>
+          {canManageInventory ? (
+            <form className="compact-form" onSubmit={createLocation}>
+              <Field label="Location">
+                <input
+                  value={locationName}
+                  onChange={(event) => setLocationName(event.target.value)}
+                />
+              </Field>
+              <button className="primary-action" type="submit">
+                <Boxes size={18} />
+                Add location
+              </button>
+            </form>
+          ) : null}
           <div className="data-list">
             {locations.map((location) => (
               <div className="data-row" key={location.id}>
@@ -332,106 +347,112 @@ export function InventoryView({ context, token }: Props) {
           </form>
         </Panel>
 
-        <Panel title="Recipes">
-          <form className="compact-form" onSubmit={saveRecipe}>
-            <Field label="Menu item">
-              <select
-                value={selectedMenuItemId}
-                onChange={(event) => setSelectedMenuItemId(event.target.value)}
-              >
-                {menuItems.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
+        {canManageInventory ? (
+          <>
+            <Panel title="Recipes">
+              <form className="compact-form" onSubmit={saveRecipe}>
+                <Field label="Menu item">
+                  <select
+                    value={selectedMenuItemId}
+                    onChange={(event) => setSelectedMenuItemId(event.target.value)}
+                  >
+                    {menuItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Ingredient">
+                  <select
+                    value={recipeIngredientId}
+                    onChange={(event) => setRecipeIngredientId(event.target.value)}
+                  >
+                    {ingredients.map((ingredient) => (
+                      <option key={ingredient.id} value={ingredient.id}>
+                        {ingredient.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Per item">
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={recipeQuantity}
+                    onChange={(event) => setRecipeQuantity(event.target.value)}
+                  />
+                </Field>
+                <button className="primary-action" type="submit">
+                  <Save size={18} />
+                  Save recipe
+                </button>
+              </form>
+              <div className="data-list">
+                {recipeItems.map((item) => (
+                  <div className="data-row" key={item.id}>
+                    <strong>{item.ingredient_name}</strong>
+                    <span>
+                      {item.quantity} {item.unit}
+                    </span>
+                  </div>
                 ))}
-              </select>
-            </Field>
-            <Field label="Ingredient">
-              <select
-                value={recipeIngredientId}
-                onChange={(event) => setRecipeIngredientId(event.target.value)}
-              >
-                {ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.id}>
-                    {ingredient.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Per item">
-              <input
-                type="number"
-                step="0.001"
-                value={recipeQuantity}
-                onChange={(event) => setRecipeQuantity(event.target.value)}
-              />
-            </Field>
-            <button className="primary-action" type="submit">
-              <Save size={18} />
-              Save recipe
-            </button>
-          </form>
-          <div className="data-list">
-            {recipeItems.map((item) => (
-              <div className="data-row" key={item.id}>
-                <strong>{item.ingredient_name}</strong>
-                <span>
-                  {item.quantity} {item.unit}
-                </span>
+                {!recipeItems.length ? (
+                  <EmptyState>No recipe items for this menu item</EmptyState>
+                ) : null}
               </div>
-            ))}
-            {!recipeItems.length ? <EmptyState>No recipe items for this menu item</EmptyState> : null}
-          </div>
-        </Panel>
+            </Panel>
 
-        <Panel title="Stock Thresholds">
-          <form className="compact-form" onSubmit={saveThreshold}>
-            <Field label="Ingredient">
-              <select
-                value={thresholdIngredientId}
-                onChange={(event) => setThresholdIngredientId(event.target.value)}
-              >
-                {ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.id}>
-                    {ingredient.name}
-                  </option>
+            <Panel title="Stock Thresholds">
+              <form className="compact-form" onSubmit={saveThreshold}>
+                <Field label="Ingredient">
+                  <select
+                    value={thresholdIngredientId}
+                    onChange={(event) => setThresholdIngredientId(event.target.value)}
+                  >
+                    {ingredients.map((ingredient) => (
+                      <option key={ingredient.id} value={ingredient.id}>
+                        {ingredient.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Warn below">
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={warningQuantity}
+                    onChange={(event) => setWarningQuantity(event.target.value)}
+                  />
+                </Field>
+                <Field label="Critical below">
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={criticalQuantity}
+                    onChange={(event) => setCriticalQuantity(event.target.value)}
+                  />
+                </Field>
+                <button className="primary-action" type="submit">
+                  <Save size={18} />
+                  Save threshold
+                </button>
+              </form>
+              <div className="data-list">
+                {thresholds.map((threshold) => (
+                  <div className="data-row" key={threshold.id}>
+                    <strong>{threshold.ingredient_name}</strong>
+                    <span>
+                      Warn {Number(threshold.warning_quantity).toFixed(3)} / Critical{" "}
+                      {Number(threshold.critical_quantity).toFixed(3)} {threshold.unit}
+                    </span>
+                  </div>
                 ))}
-              </select>
-            </Field>
-            <Field label="Warn below">
-              <input
-                type="number"
-                step="0.001"
-                value={warningQuantity}
-                onChange={(event) => setWarningQuantity(event.target.value)}
-              />
-            </Field>
-            <Field label="Critical below">
-              <input
-                type="number"
-                step="0.001"
-                value={criticalQuantity}
-                onChange={(event) => setCriticalQuantity(event.target.value)}
-              />
-            </Field>
-            <button className="primary-action" type="submit">
-              <Save size={18} />
-              Save threshold
-            </button>
-          </form>
-          <div className="data-list">
-            {thresholds.map((threshold) => (
-              <div className="data-row" key={threshold.id}>
-                <strong>{threshold.ingredient_name}</strong>
-                <span>
-                  Warn {Number(threshold.warning_quantity).toFixed(3)} / Critical{" "}
-                  {Number(threshold.critical_quantity).toFixed(3)} {threshold.unit}
-                </span>
+                {!thresholds.length ? <EmptyState>No thresholds configured yet</EmptyState> : null}
               </div>
-            ))}
-            {!thresholds.length ? <EmptyState>No thresholds configured yet</EmptyState> : null}
-          </div>
-        </Panel>
+            </Panel>
+          </>
+        ) : null}
 
         <Panel title="Balances">
           <div className="data-list">

@@ -333,7 +333,7 @@ def set_password_with_token(db: Session, raw_token: str, password: str) -> User 
 
 def seed_roles(db: Session) -> None:
     """Ensure the default roles exist in the database."""
-    default_roles = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN"]
+    default_roles = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN", "INVENTORY"]
     for role_name in default_roles:
         exists = db.query(Role).filter(Role.name == role_name).first()
         if not exists:

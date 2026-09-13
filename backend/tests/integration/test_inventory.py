@@ -11,6 +11,8 @@ from app.auth.service import create_user
 from app.inventory.enums import StockMovementType
 from app.inventory.models import StockMovement
 from app.orders.models import Order
+from app.tenants.schemas import BranchCreate
+from app.tenants.service import create_branch
 
 pytestmark = pytest.mark.integration
 
@@ -405,6 +407,248 @@ def test_kitchen_can_read_low_stock_alerts_but_not_configure_thresholds(
         f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
         headers=kitchen_headers,
         json={"warning_quantity": "10.000", "critical_quantity": "3.000"},
+    )
+    assert forbidden_response.status_code == 403
+
+
+def test_inventory_worker_can_receive_stock_and_read_branch_alerts_only(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    ingredient, location = create_ingredient_location_and_stock(
+        api_client,
+        restaurant_id,
+        branch_id,
+        owner_headers,
+        quantity="1.000",
+    )
+    threshold_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+        headers=owner_headers,
+        json={"warning_quantity": "5.000", "critical_quantity": "2.000"},
+    )
+    assert threshold_response.status_code == 200, threshold_response.text
+
+    create_user(
+        db_session,
+        UserCreate(
+            email="inventory@example.com",
+            password="inventorypassword",
+            first_name="Stock",
+            last_name="Worker",
+            role_name="INVENTORY",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    inventory_headers = login(api_client, "inventory@example.com", "inventorypassword")
+
+    ingredients_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/ingredients",
+        headers=inventory_headers,
+    )
+    assert ingredients_response.status_code == 200, ingredients_response.text
+    assert ingredients_response.json()[0]["id"] == ingredient["id"]
+
+    locations_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/locations",
+        headers=inventory_headers,
+    )
+    assert locations_response.status_code == 200, locations_response.text
+    assert locations_response.json()[0]["id"] == location["id"]
+
+    balances_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/balances",
+        headers=inventory_headers,
+    )
+    assert balances_response.status_code == 200, balances_response.text
+    assert balances_response.json()[0]["quantity_on_hand"] == "1.000"
+
+    alerts_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/low-stock-alerts",
+        headers=inventory_headers,
+    )
+    assert alerts_response.status_code == 200, alerts_response.text
+    assert alerts_response.json()[0]["severity"] == "CRITICAL"
+
+    receive_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=inventory_headers,
+        json={
+            "stock_location_id": location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.RECEIVED.value,
+            "quantity": "10.000",
+        },
+    )
+    assert receive_response.status_code == 201, receive_response.text
+
+    wastage_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=inventory_headers,
+        json={
+            "stock_location_id": location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.WASTAGE.value,
+            "quantity": "-1.000",
+        },
+    )
+    assert wastage_response.status_code == 403
+    assert wastage_response.json()["detail"] == "Inventory users can only receive stock"
+
+
+def test_inventory_worker_is_blocked_from_money_staff_and_management_surfaces(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    ingredient, location = create_ingredient_location_and_stock(
+        api_client,
+        restaurant_id,
+        branch_id,
+        owner_headers,
+        quantity="10.000",
+    )
+    item = create_menu_item(api_client, restaurant_id, owner_headers)
+    order = create_ready_order(api_client, restaurant_id, branch_id, owner_headers, item["id"])
+
+    create_user(
+        db_session,
+        UserCreate(
+            email="restricted-inventory@example.com",
+            password="inventorypassword",
+            first_name="Restricted",
+            last_name="Inventory",
+            role_name="INVENTORY",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    inventory_headers = login(
+        api_client,
+        "restricted-inventory@example.com",
+        "inventorypassword",
+    )
+
+    forbidden_checks = [
+        api_client.post(
+            f"/api/v1/restaurants/{restaurant_id}/inventory/ingredients",
+            headers=inventory_headers,
+            json={"name": "Restricted Ingredient", "unit": "portion"},
+        ),
+        api_client.post(
+            f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/locations",
+            headers=inventory_headers,
+            json={"name": "Restricted Location"},
+        ),
+        api_client.put(
+            f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/thresholds/{ingredient['id']}",
+            headers=inventory_headers,
+            json={"warning_quantity": "4.000", "critical_quantity": "2.000"},
+        ),
+        api_client.put(
+            f"/api/v1/restaurants/{restaurant_id}/inventory/menu-items/{item['id']}/recipe-items",
+            headers=inventory_headers,
+            json={"ingredient_id": ingredient["id"], "quantity": "1.000"},
+        ),
+        api_client.post(
+            f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+            headers=inventory_headers,
+            json={
+                "customer_id": None,
+                "items": [{"menu_item_id": item["id"], "quantity": 1}],
+                "payment_method": "CASH",
+            },
+        ),
+        api_client.post(
+            f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/cash/confirm",
+            headers=inventory_headers,
+            json={"amount_received": "50.00"},
+        ),
+        api_client.get(
+            f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
+            headers=inventory_headers,
+        ),
+        api_client.get(
+            "/api/v1/auth/users",
+            headers=inventory_headers,
+            params={"restaurant_id": restaurant_id},
+        ),
+        api_client.post(
+            f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+            headers=inventory_headers,
+        ),
+    ]
+    assert all(response.status_code == 403 for response in forbidden_checks)
+
+    allowed_movement_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/movements",
+        headers=inventory_headers,
+        params={"stock_location_id": location["id"]},
+    )
+    assert allowed_movement_response.status_code == 200, allowed_movement_response.text
+
+
+def test_inventory_worker_is_limited_to_assigned_branches(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    assigned_branch = seeded_restaurant["branch"]
+    other_branch = create_branch(
+        db_session,
+        restaurant.id,
+        BranchCreate(name="Stock Annex Test", code="SAT", location="Gaborone"),
+    )
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    ingredient, location = create_ingredient_location_and_stock(
+        api_client,
+        str(restaurant.id),
+        str(assigned_branch.id),
+        owner_headers,
+        quantity="10.000",
+    )
+    create_user(
+        db_session,
+        UserCreate(
+            email="branch-inventory@example.com",
+            password="inventorypassword",
+            first_name="Branch",
+            last_name="Inventory",
+            role_name="INVENTORY",
+            restaurant_id=restaurant.id,
+            branch_ids=[assigned_branch.id],
+        ),
+    )
+    inventory_headers = login(api_client, "branch-inventory@example.com", "inventorypassword")
+
+    allowed_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant.id}/inventory/branches/{assigned_branch.id}/movements",
+        headers=inventory_headers,
+        json={
+            "stock_location_id": location["id"],
+            "ingredient_id": ingredient["id"],
+            "movement_type": StockMovementType.RECEIVED.value,
+            "quantity": "5.000",
+        },
+    )
+    assert allowed_response.status_code == 201, allowed_response.text
+
+    forbidden_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant.id}/inventory/branches/{other_branch.id}/balances",
+        headers=inventory_headers,
     )
     assert forbidden_response.status_code == 403
 

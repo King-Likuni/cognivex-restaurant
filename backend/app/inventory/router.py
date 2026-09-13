@@ -11,9 +11,11 @@ from app.core.dependencies import (
     RoleChecker,
     ensure_restaurant_access,
     require_branch_access,
+    require_inventory,
     require_manager,
 )
 from app.inventory import service
+from app.inventory.enums import StockMovementType
 from app.inventory.schemas import (
     IngredientCreate,
     IngredientResponse,
@@ -32,7 +34,7 @@ from app.inventory.schemas import (
 )
 
 router = APIRouter(prefix="/restaurants/{restaurant_id}/inventory", tags=["Inventory"])
-require_inventory_alert_reader = RoleChecker(["OWNER", "MANAGER", "KITCHEN"])
+require_inventory_alert_reader = RoleChecker(["OWNER", "MANAGER", "KITCHEN", "INVENTORY"])
 
 
 def recipe_response(recipe_item) -> RecipeItemResponse:
@@ -81,7 +83,7 @@ def create_ingredient(
 def list_ingredients(
     restaurant_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_inventory),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
     return service.list_ingredients(db, restaurant_id)
@@ -132,7 +134,7 @@ def list_stock_locations(
     restaurant_id: UUID,
     branch_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_inventory),
     branch_user: User = Depends(require_branch_access),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
@@ -235,12 +237,18 @@ def create_stock_movement(
     branch_id: UUID,
     data: StockMovementCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_inventory),
     branch_user: User = Depends(require_branch_access),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
     if branch_user.id != current_user.id:
         raise HTTPException(status_code=403, detail="Branch access validation failed")
+    role_name = current_user.role.name if current_user.role else None
+    if role_name == "INVENTORY" and data.movement_type != StockMovementType.RECEIVED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inventory users can only receive stock",
+        )
     try:
         return service.create_stock_movement(db, restaurant_id, branch_id, data, current_user)
     except ValueError as exc:
@@ -254,7 +262,7 @@ def list_stock_movements(
     ingredient_id: UUID | None = Query(default=None),
     stock_location_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_inventory),
     branch_user: User = Depends(require_branch_access),
 ):
     ensure_restaurant_access(current_user, restaurant_id)
@@ -275,7 +283,7 @@ def list_stock_balances(
     branch_id: UUID,
     stock_location_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_inventory),
     branch_user: User = Depends(require_branch_access),
 ):
     ensure_restaurant_access(current_user, restaurant_id)

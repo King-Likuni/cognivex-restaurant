@@ -70,6 +70,7 @@ const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier"],
   KITCHEN: ["kitchen"],
+  INVENTORY: ["inventory"],
 };
 
 function isPlaceholderBranch(branch: Branch) {
@@ -334,7 +335,7 @@ function OperationsApp() {
               <KitchenView context={context} token={token} />
             ) : null}
             {view === "inventory" && visibleNavItems.some((item) => item.key === "inventory") ? (
-              <InventoryView context={context} token={token} />
+              <InventoryView context={context} token={token} roleName={session.user.role_name} />
             ) : null}
             {view === "dashboard" && visibleNavItems.some((item) => item.key === "dashboard") ? (
               <DashboardView context={context} token={token} />
