@@ -12,6 +12,8 @@ export type User = {
   role_name: RoleName | null;
   restaurant_id: string | null;
   branch_ids: string[];
+  branch_assignments: { id: string; code: string; name: string }[];
+  created_at: string | null;
 };
 
 export type PasswordSetupToken = {

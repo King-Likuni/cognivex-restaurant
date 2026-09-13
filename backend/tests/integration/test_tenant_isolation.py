@@ -246,6 +246,30 @@ def test_cashier_branch_list_only_includes_assigned_branches(
     assert branch_ids == {str(assigned_branch.id)}
     assert str(other_branch.id) not in branch_ids
 
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    item = create_menu_item(api_client, str(restaurant.id), owner_headers)
+    allowed_order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{assigned_branch.id}/orders/cashier",
+        headers=cashier_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert allowed_order_response.status_code == 201, allowed_order_response.text
+
+    forbidden_order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant.id}/branches/{other_branch.id}/orders/cashier",
+        headers=cashier_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert forbidden_order_response.status_code == 403
+
 
 def test_owner_can_deactivate_placeholder_branch(
     api_client: TestClient,
@@ -556,6 +580,10 @@ def test_owner_can_manage_restaurant_staff(
     assert create_response.status_code == 201, create_response.text
     cashier = create_response.json()
     assert cashier["branch_ids"] == [str(branch.id)]
+    assert cashier["branch_assignments"] == [
+        {"id": str(branch.id), "code": branch.code, "name": branch.name}
+    ]
+    assert cashier["created_at"] is not None
 
     list_response = api_client.get(
         "/api/v1/auth/users",

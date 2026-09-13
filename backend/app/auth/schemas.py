@@ -57,6 +57,12 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class UserBranchAssignmentResponse(BaseModel):
+    id: UUID
+    code: str
+    name: str
+
+
 class UserResponse(BaseModel):
     id: UUID
     email: str
@@ -66,6 +72,8 @@ class UserResponse(BaseModel):
     role_name: str | None = None
     restaurant_id: UUID | None = None
     branch_ids: list[UUID] = Field(default_factory=list)
+    branch_assignments: list[UserBranchAssignmentResponse] = Field(default_factory=list)
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

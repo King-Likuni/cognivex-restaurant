@@ -1,4 +1,15 @@
-import { Copy, KeyRound, Plus, Power, PowerOff, RefreshCw, Save, Users } from "lucide-react";
+import {
+  Copy,
+  Eye,
+  KeyRound,
+  Plus,
+  Power,
+  PowerOff,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AppContext } from "../App";
@@ -54,6 +65,81 @@ function requiresBranchAssignment(roleName: StaffRole) {
   return roleName === "CASHIER" || roleName === "KITCHEN";
 }
 
+function workerName(user: User) {
+  const name = `${user.first_name ?? ""} ${user.last_name ?? ""}`.trim();
+  return name || user.email;
+}
+
+function formatTenure(createdAt: string | null) {
+  if (!createdAt) {
+    return "Start date unavailable";
+  }
+  const startedAt = new Date(createdAt);
+  if (Number.isNaN(startedAt.getTime())) {
+    return "Start date unavailable";
+  }
+  const days = Math.max(
+    0,
+    Math.floor((Date.now() - startedAt.getTime()) / (1000 * 60 * 60 * 24)),
+  );
+  if (days === 0) {
+    return "Started today";
+  }
+  if (days === 1) {
+    return "1 day with the restaurant";
+  }
+  if (days < 31) {
+    return `${days} days with the restaurant`;
+  }
+  const months = Math.floor(days / 30);
+  if (months < 12) {
+    return `${months} month${months === 1 ? "" : "s"} with the restaurant`;
+  }
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? "" : "s"} with the restaurant`;
+}
+
+function formatStartDate(createdAt: string | null) {
+  if (!createdAt) {
+    return "Unknown";
+  }
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function branchLabels(user: User, branches: Branch[]) {
+  const labels = user.branch_assignments?.length
+    ? user.branch_assignments.map((branch) => `${branch.name} (${branch.code})`)
+    : user.branch_ids
+        .map((branchId) => branches.find((branch) => branch.id === branchId))
+        .filter((branch): branch is Branch => Boolean(branch))
+        .map((branch) => `${branch.name} (${branch.code})`);
+  return labels.length ? labels : ["All active branches by role"];
+}
+
+function roleSummary(roleName: RoleName | null) {
+  if (roleName === "OWNER") {
+    return "Full restaurant administration, staff, branches, inventory, kitchen, cashier, audit, and reports.";
+  }
+  if (roleName === "MANAGER") {
+    return "Operational management for cashier, kitchen, inventory, and reports.";
+  }
+  if (roleName === "CASHIER") {
+    return "Cashier operations for assigned branches only.";
+  }
+  if (roleName === "KITCHEN") {
+    return "Kitchen board and stock alerts for assigned branches only.";
+  }
+  return "No operational console access.";
+}
+
 function toggleBranchId(branchIds: string[], branchId: string) {
   if (branchIds.includes(branchId)) {
     return branchIds.filter((currentBranchId) => currentBranchId !== branchId);
@@ -74,10 +160,15 @@ export function StaffManagementView({ context, token, branches }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [latestSetupUrl, setLatestSetupUrl] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const activeStaffCount = useMemo(
     () => users.filter((user) => user.is_active).length,
     [users],
+  );
+  const selectedUser = useMemo(
+    () => users.find((user) => user.id === selectedUserId) ?? users[0] ?? null,
+    [selectedUserId, users],
   );
 
   const loadUsers = useCallback(async () => {
@@ -90,6 +181,11 @@ export function StaffManagementView({ context, token, branches }: Props) {
       });
       setUsers(nextUsers);
       setDrafts(Object.fromEntries(nextUsers.map((user) => [user.id, draftFromUser(user)])));
+      setSelectedUserId((current) =>
+        current && nextUsers.some((user) => user.id === current)
+          ? current
+          : nextUsers[0]?.id ?? null,
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load staff");
     } finally {
@@ -247,6 +343,53 @@ export function StaffManagementView({ context, token, branches }: Props) {
           </Panel>
         ) : null}
 
+        <Panel title="Worker Profile">
+          {selectedUser ? (
+            <div className="staff-profile">
+              <div className="staff-profile-header">
+                <span className="profile-avatar">{workerName(selectedUser).slice(0, 2).toUpperCase()}</span>
+                <div>
+                  <h3>{workerName(selectedUser)}</h3>
+                  <span>{selectedUser.email}</span>
+                </div>
+                <span className={selectedUser.is_active ? "status-pill" : "status-pill inactive"}>
+                  {selectedUser.is_active ? "Active" : "Inactive"}
+                </span>
+              </div>
+              <div className="staff-profile-grid">
+                <div>
+                  <span>Role</span>
+                  <strong>{selectedUser.role_name ?? "Unassigned"}</strong>
+                </div>
+                <div>
+                  <span>Started</span>
+                  <strong>{formatStartDate(selectedUser.created_at)}</strong>
+                </div>
+                <div>
+                  <span>Tenure</span>
+                  <strong>{formatTenure(selectedUser.created_at)}</strong>
+                </div>
+              </div>
+              <div className="staff-profile-section">
+                <span>Branch access</span>
+                <div className="branch-chip-list">
+                  {branchLabels(selectedUser, branches).map((branch) => (
+                    <span className="branch-chip" key={branch}>
+                      {branch}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="staff-profile-section">
+                <span>Access summary</span>
+                <p>{roleSummary(selectedUser.role_name)}</p>
+              </div>
+            </div>
+          ) : (
+            <EmptyState>Select a worker to view their profile</EmptyState>
+          )}
+        </Panel>
+
         <Panel title="Add Staff">
           <form className="staff-form" onSubmit={createStaff}>
             <Field label="First name">
@@ -330,9 +473,11 @@ export function StaffManagementView({ context, token, branches }: Props) {
                     <Users size={18} />
                     <div>
                       <strong>
-                        {user.first_name} {user.last_name}
+                        {workerName(user)}
                       </strong>
-                      <span>{user.email}</span>
+                      <span>
+                        {user.email} | {formatTenure(user.created_at)}
+                      </span>
                     </div>
                     <span className={user.is_active ? "status-pill" : "status-pill inactive"}>
                       {user.is_active ? "Active" : "Inactive"}
@@ -390,7 +535,20 @@ export function StaffManagementView({ context, token, branches }: Props) {
                     ))}
                   </fieldset>
 
+                  <div className="staff-permission-note">
+                    <ShieldCheck size={16} />
+                    <span>{roleSummary(draft.role_name)}</span>
+                  </div>
+
                   <div className="button-row">
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => setSelectedUserId(user.id)}
+                    >
+                      <Eye size={17} />
+                      Profile
+                    </button>
                     <button
                       className="secondary-action"
                       type="button"

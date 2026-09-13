@@ -32,6 +32,7 @@ class User(Base):
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     restaurant = relationship("Restaurant", back_populates="users")
     role = relationship("Role")

@@ -43,6 +43,11 @@ def serialize_user(user: User) -> UserResponse:
         role_name=user.role.name if user.role else None,
         restaurant_id=user.restaurant_id,
         branch_ids=[branch.id for branch in user.branches],
+        branch_assignments=[
+            {"id": branch.id, "code": branch.code, "name": branch.name}
+            for branch in sorted(user.branches, key=lambda branch: branch.name.lower())
+        ],
+        created_at=user.created_at,
     )
 
 
@@ -168,16 +173,7 @@ def create_user(
             detail=str(e),
         ) from e
 
-    return UserResponse(
-        id=user.id,
-        email=user.email,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        is_active=user.is_active,
-        role_name=user.role.name if user.role else None,
-        restaurant_id=user.restaurant_id,
-        branch_ids=[branch.id for branch in user.branches],
-    )
+    return serialize_user(user)
 
 
 @router.post(
