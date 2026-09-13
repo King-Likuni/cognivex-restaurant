@@ -379,6 +379,149 @@ def test_cashier_can_read_menu_and_cancel_unpaid_order(
     assert report_response.json()["cancelled_orders"] == 1
 
 
+def test_cashier_and_kitchen_share_branch_order_workflow_without_admin_surfaces(
+    api_client: TestClient,
+    db_session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    create_user(
+        db_session,
+        UserCreate(
+            email="shared-cashier@example.com",
+            password="cashierpassword",
+            first_name="Shared",
+            last_name="Cashier",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    create_user(
+        db_session,
+        UserCreate(
+            email="shared-kitchen@example.com",
+            password="kitchenpassword",
+            first_name="Shared",
+            last_name="Kitchen",
+            role_name="KITCHEN",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    cashier_headers = login(api_client, "shared-cashier@example.com", "cashierpassword")
+    kitchen_headers = login(api_client, "shared-kitchen@example.com", "kitchenpassword")
+
+    category = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/categories",
+        headers=owner_headers,
+        json={"name": "Shared Ops", "display_order": 5},
+    ).json()
+    item = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/menu/items",
+        headers=owner_headers,
+        json={
+            "category_id": category["id"],
+            "name": "Shared Ops Meal",
+            "description": None,
+            "price": "55.00",
+            "image_url": None,
+            "is_available": True,
+        },
+    ).json()
+
+    order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=cashier_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert order_response.status_code == 201, order_response.text
+    order = order_response.json()
+
+    unpaid_start_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=cashier_headers,
+    )
+    assert unpaid_start_response.status_code == 400
+
+    payment_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/orders/{order['id']}/payments/cash/confirm",
+        headers=cashier_headers,
+        json={"amount_received": "55.00"},
+    )
+    assert payment_response.status_code == 201, payment_response.text
+
+    cashier_board_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/board",
+        headers=cashier_headers,
+    )
+    assert cashier_board_response.status_code == 200, cashier_board_response.text
+    assert order["id"] in {
+        queued_order["id"] for queued_order in cashier_board_response.json()["new"]
+    }
+
+    start_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/start",
+        headers=cashier_headers,
+    )
+    assert start_response.status_code == 200, start_response.text
+    assert start_response.json()["order_status"] == "PREPARING"
+
+    ready_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/kitchen/orders/{order['id']}/ready",
+        headers=cashier_headers,
+    )
+    assert ready_response.status_code == 200, ready_response.text
+    assert ready_response.json()["order_status"] == "READY"
+
+    kitchen_orders_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/",
+        headers=kitchen_headers,
+        params={"business_date": date.today().isoformat(), "status": "READY"},
+    )
+    assert kitchen_orders_response.status_code == 200, kitchen_orders_response.text
+    assert order["id"] in {ready_order["id"] for ready_order in kitchen_orders_response.json()}
+
+    collect_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{order['id']}/collect",
+        headers=kitchen_headers,
+    )
+    assert collect_response.status_code == 200, collect_response.text
+    assert collect_response.json()["order_status"] == "COLLECTED"
+
+    forbidden_checks = [
+        api_client.get(
+            "/api/v1/auth/users",
+            headers=kitchen_headers,
+            params={"restaurant_id": restaurant_id},
+        ),
+        api_client.get(
+            f"/api/v1/restaurants/{restaurant_id}/audit-logs/",
+            headers=cashier_headers,
+        ),
+        api_client.patch(
+            f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}",
+            headers=kitchen_headers,
+            json={"location": "Changed by kitchen"},
+        ),
+        api_client.get(
+            f"/api/v1/restaurants/{restaurant_id}/reports/daily-sales",
+            headers=kitchen_headers,
+            params={"business_date": date.today().isoformat(), "branch_id": branch_id},
+        ),
+    ]
+    assert all(response.status_code == 403 for response in forbidden_checks)
+
+
 def test_paid_order_cannot_be_cancelled_without_refund_workflow(
     api_client: TestClient,
     seeded_restaurant: dict[str, object],

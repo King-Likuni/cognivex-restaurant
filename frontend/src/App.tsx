@@ -68,8 +68,8 @@ const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
   ADMIN: ["branches", "staff", "audit"],
   OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
-  CASHIER: ["cashier"],
-  KITCHEN: ["kitchen"],
+  CASHIER: ["cashier", "kitchen"],
+  KITCHEN: ["cashier", "kitchen"],
   INVENTORY: ["inventory"],
 };
 

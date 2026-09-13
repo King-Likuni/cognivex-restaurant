@@ -83,10 +83,11 @@ class RoleChecker:
 
 
 # Convenience instances
+shared_order_roles = ["OWNER", "MANAGER", "CASHIER", "KITCHEN"]
 require_owner = RoleChecker(["OWNER"])
 require_manager = RoleChecker(["OWNER", "MANAGER"])
-require_cashier = RoleChecker(["OWNER", "MANAGER", "CASHIER"])
-require_kitchen = RoleChecker(["OWNER", "MANAGER", "KITCHEN"])
+require_cashier = RoleChecker(shared_order_roles)
+require_kitchen = RoleChecker(shared_order_roles)
 require_inventory = RoleChecker(["OWNER", "MANAGER", "INVENTORY"])
 require_admin = RoleChecker(["ADMIN"])
 

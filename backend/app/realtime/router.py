@@ -13,6 +13,7 @@ from app.realtime.events import branch_channel, event_bus, order_channel
 from app.tenants.models import Branch
 
 router = APIRouter(prefix="/ws", tags=["Realtime"])
+SHARED_ORDER_ROLES = {"ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN"}
 
 
 def role_name(user: User) -> str | None:
@@ -89,7 +90,7 @@ async def kitchen_updates(
         user,
         restaurant_id,
         branch_id,
-        {"ADMIN", "OWNER", "MANAGER", "KITCHEN"},
+        SHARED_ORDER_ROLES,
     ):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -110,7 +111,7 @@ async def cashier_updates(
         user,
         restaurant_id,
         branch_id,
-        {"ADMIN", "OWNER", "MANAGER", "CASHIER"},
+        SHARED_ORDER_ROLES,
     ):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

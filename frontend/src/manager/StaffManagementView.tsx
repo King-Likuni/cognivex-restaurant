@@ -132,10 +132,10 @@ function roleSummary(roleName: RoleName | null) {
     return "Operational management for cashier, kitchen, inventory, and reports.";
   }
   if (roleName === "CASHIER") {
-    return "Cashier operations for assigned branches only.";
+    return "Cashier and kitchen order workflow for assigned branches only.";
   }
   if (roleName === "KITCHEN") {
-    return "Kitchen board and stock alerts for assigned branches only.";
+    return "Kitchen and cashier order workflow for assigned branches only.";
   }
   if (roleName === "INVENTORY") {
     return "Stock receiving, balances, and low-stock alerts for assigned branches only.";
