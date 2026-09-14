@@ -23,6 +23,7 @@ class Restaurant(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, index=True, nullable=False)
+    status = Column(String, default="ACTIVE", nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

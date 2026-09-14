@@ -87,6 +87,147 @@ def create_menu_item(
     return item_response.json()
 
 
+def test_admin_can_onboard_restaurant_branch_and_owner_invite(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+
+    response = api_client.post(
+        "/api/v1/restaurants/onboard",
+        headers=admin_headers,
+        json={
+            "restaurant_name": "Mafresh",
+            "restaurant_code": "MF",
+            "branch_name": "Station",
+            "branch_code": "ST",
+            "branch_location": "Gaborone",
+            "owner_email": "mafresh.owner@example.com",
+            "owner_first_name": "Mafresh",
+            "owner_last_name": "Owner",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["restaurant"]["name"] == "Mafresh"
+    assert payload["restaurant"]["code"] == "MF"
+    assert payload["restaurant"]["status"] == "SETUP_PENDING"
+    assert payload["branch"]["restaurant_id"] == payload["restaurant"]["id"]
+    assert payload["branch"]["name"] == "Station"
+    assert payload["owner"]["email"] == "mafresh.owner@example.com"
+    assert payload["owner"]["role_name"] == "OWNER"
+    assert payload["owner"]["restaurant_id"] == payload["restaurant"]["id"]
+    assert payload["branch"]["id"] in payload["owner"]["branch_ids"]
+    assert payload["invite"]["setup_url_path"].startswith("/password-setup?token=")
+
+    preview_response = api_client.get(f"/api/v1/auth/password-setup/{payload['invite']['token']}")
+    assert preview_response.status_code == 200, preview_response.text
+    assert preview_response.json()["email"] == "mafresh.owner@example.com"
+
+    setup_response = api_client.post(
+        "/api/v1/auth/password-setup/confirm",
+        json={"token": payload["invite"]["token"], "password": "mafreshownerpassword"},
+    )
+    assert setup_response.status_code == 200, setup_response.text
+
+    owner_login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "mafresh.owner@example.com", "password": "mafreshownerpassword"},
+    )
+    assert owner_login_response.status_code == 200, owner_login_response.text
+
+    restaurants_response = api_client.get("/api/v1/restaurants/platform", headers=admin_headers)
+    assert restaurants_response.status_code == 200, restaurants_response.text
+    mafresh = next(
+        restaurant
+        for restaurant in restaurants_response.json()
+        if restaurant["id"] == payload["restaurant"]["id"]
+    )
+    assert mafresh["status"] == "ACTIVE"
+    assert mafresh["branch_count"] == 1
+    assert mafresh["owner_email"] == "mafresh.owner@example.com"
+
+
+def test_restaurant_owner_cannot_use_platform_onboarding(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    response = api_client.post(
+        "/api/v1/restaurants/onboard",
+        headers=owner_headers,
+        json={
+            "restaurant_name": "Chicken Licken",
+            "branch_name": "Airport",
+            "owner_email": "chicken.licken.owner@example.com",
+            "owner_first_name": "Chicken",
+            "owner_last_name": "Owner",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_can_suspend_and_reactivate_restaurant_access(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+
+    suspend_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/lifecycle",
+        headers=admin_headers,
+        json={"status": "SUSPENDED"},
+    )
+    assert suspend_response.status_code == 200, suspend_response.text
+    assert suspend_response.json()["status"] == "SUSPENDED"
+    assert suspend_response.json()["is_active"] is False
+
+    owner_login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "owner@example.com", "password": "ownerpassword"},
+    )
+    assert owner_login_response.status_code == 401
+
+    reactivate_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/lifecycle",
+        headers=admin_headers,
+        json={"status": "ACTIVE"},
+    )
+    assert reactivate_response.status_code == 200, reactivate_response.text
+    assert reactivate_response.json()["status"] == "ACTIVE"
+    assert reactivate_response.json()["is_active"] is True
+
+    restored_owner_login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "owner@example.com", "password": "ownerpassword"},
+    )
+    assert restored_owner_login_response.status_code == 200, restored_owner_login_response.text
+
+
+def test_admin_can_create_owner_setup_link(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+
+    response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/owner-setup-link",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["setup_url_path"].startswith("/password-setup?token=")
+    preview_response = api_client.get(f"/api/v1/auth/password-setup/{payload['token']}")
+    assert preview_response.status_code == 200, preview_response.text
+    assert preview_response.json()["email"] == "owner@example.com"
+
+
 def create_ready_order(
     client: TestClient,
     restaurant_id: str,

@@ -778,6 +778,79 @@ button:disabled {
   padding: 8px 10px;
 }
 
+.tenant-onboarding-form,
+.tenant-list {
+  display: grid;
+  gap: 12px;
+}
+
+.form-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e4e9ef;
+  padding-top: 14px;
+  color: #263244;
+  font-weight: 900;
+}
+
+.form-section-title:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.tenant-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tenant-summary span {
+  border-radius: 8px;
+  background: #edf1f5;
+  color: #3e4d60;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tenant-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 14px;
+}
+
+.tenant-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.tenant-card span:not(.status-pill) {
+  color: #667286;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tenant-card-meta,
+.tenant-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tenant-card-meta {
+  margin-top: 6px;
+}
+
+.tenant-card-actions {
+  justify-content: flex-end;
+}
+
 .password-setup-complete {
   display: grid;
   justify-items: center;
@@ -1224,10 +1297,15 @@ button:disabled {
   .cart-line,
   .data-row,
   .event-row,
-  .customer-menu-row {
+  .customer-menu-row,
+  .tenant-card {
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;
+  }
+
+  .tenant-card-actions {
+    justify-content: stretch;
   }
 
   .status-steps {

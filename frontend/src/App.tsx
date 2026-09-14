@@ -8,6 +8,7 @@ import {
   LogOut,
   RefreshCw,
   ShoppingCart,
+  Store,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,6 +24,7 @@ import { InventoryView } from "./manager/InventoryView";
 import { DashboardView } from "./manager/DashboardView";
 import { StaffManagementView } from "./manager/StaffManagementView";
 import { KitchenView } from "./kitchen/KitchenView";
+import { PlatformAdminView } from "./platform/PlatformAdminView";
 import {
   apiRequest,
   login,
@@ -43,6 +45,7 @@ export type AppContext = {
 };
 
 type ViewKey =
+  | "platform"
   | "cashier"
   | "kitchen"
   | "inventory"
@@ -55,6 +58,7 @@ const STORAGE_KEY = "cognivex.session";
 const BRANCH_STORAGE_KEY = "cognivex.branchId";
 
 const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = [
+  { key: "platform", label: "Platform", icon: Store },
   { key: "cashier", label: "Cashier", icon: ShoppingCart },
   { key: "kitchen", label: "Kitchen", icon: ChefHat },
   { key: "inventory", label: "Inventory", icon: Boxes },
@@ -65,7 +69,7 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
 ];
 
 const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
-  ADMIN: ["branches", "staff", "audit"],
+  ADMIN: ["platform"],
   OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier", "kitchen", "inventory", "dashboard"],
@@ -174,19 +178,18 @@ function OperationsApp() {
     if (!session) {
       return;
     }
+    if (session.user.role_name === "ADMIN") {
+      setContext(null);
+      setBranches([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
       let restaurant: Restaurant;
-      if (session.user.role_name === "ADMIN") {
-        const restaurants = await apiRequest<Restaurant[]>("/api/v1/restaurants/", {
-          token: session.token,
-        });
-        if (!restaurants.length) {
-          throw new Error("No restaurants found");
-        }
-        restaurant = restaurants[0];
-      } else if (session.user.restaurant_id) {
+      if (session.user.restaurant_id) {
         restaurant = await apiRequest<Restaurant>(
           `/api/v1/restaurants/${session.user.restaurant_id}`,
           { token: session.token },
@@ -224,11 +227,14 @@ function OperationsApp() {
   }, [view, visibleNavItems]);
 
   const title = useMemo(() => {
+    if (session?.user.role_name === "ADMIN") {
+      return "Platform Admin Console";
+    }
     if (!context) {
       return "Operations Console";
     }
     return `${context.restaurant.name} / ${context.branch.name}`;
-  }, [context]);
+  }, [context, session?.user.role_name]);
 
   if (!session) {
     return <LoginScreen onLogin={setSession} />;
@@ -321,37 +327,50 @@ function OperationsApp() {
         {error ? <Notice tone="error">{error}</Notice> : null}
         {isLoading ? <Notice>Loading workspace data</Notice> : null}
 
-        {context && token ? (
+        {token ? (
           <>
             {!visibleNavItems.length ? (
               <Notice tone="error">
                 This account does not have an operational console role assigned.
               </Notice>
             ) : null}
+            {view === "platform" && visibleNavItems.some((item) => item.key === "platform") ? (
+              <PlatformAdminView token={token} />
+            ) : null}
             {view === "cashier" && visibleNavItems.some((item) => item.key === "cashier") ? (
-              <CashierView context={context} token={token} />
+              context ? <CashierView context={context} token={token} /> : null
             ) : null}
             {view === "kitchen" && visibleNavItems.some((item) => item.key === "kitchen") ? (
-              <KitchenView context={context} token={token} />
+              context ? <KitchenView context={context} token={token} /> : null
             ) : null}
             {view === "inventory" && visibleNavItems.some((item) => item.key === "inventory") ? (
-              <InventoryView context={context} token={token} roleName={session.user.role_name} />
+              context ? (
+                <InventoryView context={context} token={token} roleName={session.user.role_name} />
+              ) : null
             ) : null}
             {view === "dashboard" && visibleNavItems.some((item) => item.key === "dashboard") ? (
-              <DashboardView context={context} token={token} roleName={session.user.role_name} />
+              context ? (
+                <DashboardView context={context} token={token} roleName={session.user.role_name} />
+              ) : null
             ) : null}
             {view === "branches" && visibleNavItems.some((item) => item.key === "branches") ? (
-              <BranchManagementView
-                context={context}
-                token={token}
-                onBranchesChanged={() => setRefreshKey((current) => current + 1)}
-              />
+              context ? (
+                <BranchManagementView
+                  context={context}
+                  token={token}
+                  onBranchesChanged={() => setRefreshKey((current) => current + 1)}
+                />
+              ) : null
             ) : null}
             {view === "staff" && visibleNavItems.some((item) => item.key === "staff") ? (
-              <StaffManagementView context={context} token={token} branches={branchOptions} />
+              context ? (
+                <StaffManagementView context={context} token={token} branches={branchOptions} />
+              ) : null
             ) : null}
             {view === "audit" && visibleNavItems.some((item) => item.key === "audit") ? (
-              <AuditLogView context={context} token={token} branches={branchOptions} />
+              context ? (
+                <AuditLogView context={context} token={token} branches={branchOptions} />
+              ) : null
             ) : null}
           </>
         ) : null}

@@ -25,6 +25,13 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
         return None
     if not user.is_active:
         return None
+    role_name = user.role.name if user.role else None
+    if (
+        role_name != "ADMIN"
+        and user.restaurant_id is not None
+        and (user.restaurant is None or not user.restaurant.is_active)
+    ):
+        return None
     if not verify_password(password, user.password_hash):
         return None
     return user
@@ -326,9 +333,19 @@ def set_password_with_token(db: Session, raw_token: str, password: str) -> User 
         return None
     reset_token.user.password_hash = get_password_hash(password)
     reset_token.used_at = utc_now()
+    user = reset_token.user
+    if (
+        reset_token.purpose == TOKEN_PURPOSE_INVITE
+        and user.role
+        and user.role.name == "OWNER"
+        and user.restaurant
+        and getattr(user.restaurant, "status", None) == "SETUP_PENDING"
+    ):
+        user.restaurant.status = "ACTIVE"
+        user.restaurant.is_active = True
     db.commit()
-    db.refresh(reset_token.user)
-    return reset_token.user
+    db.refresh(user)
+    return user
 
 
 def seed_roles(db: Session) -> None:

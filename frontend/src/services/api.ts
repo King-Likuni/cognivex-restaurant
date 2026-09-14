@@ -27,6 +27,13 @@ export type StaffInviteResponse = {
   invite: PasswordSetupToken;
 };
 
+export type RestaurantOnboardingResponse = {
+  restaurant: Restaurant;
+  branch: Branch;
+  owner: User;
+  invite: PasswordSetupToken;
+};
+
 export type PasswordSetupPreview = {
   email: string;
   first_name: string | null;
@@ -39,7 +46,17 @@ export type Restaurant = {
   id: string;
   code: string;
   name: string;
+  status: "SETUP_PENDING" | "ACTIVE" | "SUSPENDED" | string;
   is_active: boolean;
+  created_at: string | null;
+};
+
+export type RestaurantLifecycleStatus = "ACTIVE" | "SUSPENDED";
+
+export type PlatformRestaurantSummary = Restaurant & {
+  branch_count: number;
+  owner_email: string | null;
+  owner_name: string | null;
 };
 
 export type Branch = {

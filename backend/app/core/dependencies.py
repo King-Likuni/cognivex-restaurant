@@ -42,6 +42,13 @@ def get_current_user(
     user = db.query(User).filter(User.id == UUID(user_id)).first()
     if user is None or not user.is_active:
         raise credentials_exception
+    role_name = user.role.name if user.role else None
+    if (
+        role_name != "ADMIN"
+        and user.restaurant_id is not None
+        and (user.restaurant is None or not user.restaurant.is_active)
+    ):
+        raise credentials_exception
 
     return user
 
