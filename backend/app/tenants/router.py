@@ -28,6 +28,7 @@ from app.tenants.schemas import (
     RestaurantResponse,
     RestaurantSettingsResponse,
     RestaurantSettingsUpdate,
+    RestaurantSubscriptionUpdate,
 )
 
 router = APIRouter(prefix="/restaurants", tags=["Restaurants"])
@@ -128,6 +129,32 @@ def update_restaurant_lifecycle(
             db,
             restaurant_id,
             data.status,
+            changed_by=current_user,
+            suspension_reason=data.suspension_reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if restaurant is None:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    return restaurant
+
+
+@router.patch(
+    "/{restaurant_id}/subscription",
+    response_model=RestaurantResponse,
+)
+def update_restaurant_subscription(
+    restaurant_id: UUID,
+    data: RestaurantSubscriptionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Update tenant subscription state. Platform admins only."""
+    try:
+        restaurant = service.update_restaurant_subscription(
+            db,
+            restaurant_id,
+            data,
             changed_by=current_user,
         )
     except ValueError as exc:

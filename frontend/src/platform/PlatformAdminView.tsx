@@ -1,6 +1,9 @@
 import {
+  AlertTriangle,
   Building2,
+  CalendarDays,
   Copy,
+  CreditCard,
   KeyRound,
   Plus,
   Power,
@@ -18,6 +21,7 @@ import {
   type PlatformRestaurantSummary,
   type RestaurantLifecycleStatus,
   type RestaurantOnboardingResponse,
+  type RestaurantSubscriptionStatus,
 } from "../services/api";
 
 type Props = {
@@ -35,6 +39,12 @@ type OnboardingForm = {
   owner_last_name: string;
 };
 
+type SubscriptionDraft = {
+  subscription_status: RestaurantSubscriptionStatus;
+  subscription_started_at: string;
+  subscription_renews_at: string;
+};
+
 const EMPTY_FORM: OnboardingForm = {
   restaurant_name: "",
   restaurant_code: "",
@@ -50,6 +60,31 @@ function setupUrlFromInvite(invite: RestaurantOnboardingResponse["invite"]) {
   return `${window.location.origin}${invite.setup_url_path}`;
 }
 
+function formatMoney(value: string | number) {
+  return `BWP ${Number(value).toFixed(2)}`;
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "Not set";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function toDateInputValue(value: string | null) {
+  if (!value) {
+    return "";
+  }
+  return value.slice(0, 10);
+}
+
+function dateInputToIso(value: string) {
+  return value ? new Date(`${value}T00:00:00`).toISOString() : null;
+}
+
 export function PlatformAdminView({ token }: Props) {
   const [restaurants, setRestaurants] = useState<PlatformRestaurantSummary[]>([]);
   const [form, setForm] = useState<OnboardingForm>(EMPTY_FORM);
@@ -62,6 +97,11 @@ export function PlatformAdminView({ token }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionRestaurantId, setActionRestaurantId] = useState<string | null>(null);
+  const [suspendingRestaurantId, setSuspendingRestaurantId] = useState<string | null>(null);
+  const [suspensionReason, setSuspensionReason] = useState("");
+  const [subscriptionDrafts, setSubscriptionDrafts] = useState<Record<string, SubscriptionDraft>>(
+    {},
+  );
 
   const activeRestaurantCount = useMemo(
     () => restaurants.filter((restaurant) => restaurant.status === "ACTIVE").length,
@@ -73,6 +113,27 @@ export function PlatformAdminView({ token }: Props) {
   );
   const suspendedCount = useMemo(
     () => restaurants.filter((restaurant) => restaurant.status === "SUSPENDED").length,
+    [restaurants],
+  );
+  const overdueCount = useMemo(
+    () => restaurants.filter((restaurant) => restaurant.subscription_status === "OVERDUE").length,
+    [restaurants],
+  );
+  const todayRevenue = useMemo(
+    () =>
+      restaurants.reduce(
+        (total, restaurant) => total + Number(restaurant.today_revenue || 0),
+        0,
+      ),
+    [restaurants],
+  );
+  const paymentIssueCount = useMemo(
+    () =>
+      restaurants.reduce(
+        (total, restaurant) =>
+          total + restaurant.pending_payment_count + restaurant.failed_payment_count,
+        0,
+      ),
     [restaurants],
   );
 
@@ -152,6 +213,7 @@ export function PlatformAdminView({ token }: Props) {
   async function updateLifecycle(
     restaurant: PlatformRestaurantSummary,
     status: RestaurantLifecycleStatus,
+    reason: string | null = null,
   ) {
     setNotice(null);
     setError(null);
@@ -160,15 +222,66 @@ export function PlatformAdminView({ token }: Props) {
       await apiRequest(`/api/v1/restaurants/${restaurant.id}/lifecycle`, {
         method: "PATCH",
         token,
-        body: { status },
+        body: { status, suspension_reason: reason },
       });
       setNotice(`${restaurant.name} is now ${status.toLowerCase().replace("_", " ")}`);
+      setSuspendingRestaurantId(null);
+      setSuspensionReason("");
       await loadRestaurants();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update tenant status");
     } finally {
       setActionRestaurantId(null);
     }
+  }
+
+  async function updateSubscription(restaurant: PlatformRestaurantSummary) {
+    const draft = subscriptionDrafts[restaurant.id] ?? {
+      subscription_status: restaurant.subscription_status as RestaurantSubscriptionStatus,
+      subscription_started_at: toDateInputValue(restaurant.subscription_started_at),
+      subscription_renews_at: toDateInputValue(restaurant.subscription_renews_at),
+    };
+    setNotice(null);
+    setError(null);
+    setActionRestaurantId(restaurant.id);
+    try {
+      await apiRequest(`/api/v1/restaurants/${restaurant.id}/subscription`, {
+        method: "PATCH",
+        token,
+        body: {
+          subscription_status: draft.subscription_status,
+          subscription_started_at: dateInputToIso(draft.subscription_started_at),
+          subscription_renews_at: dateInputToIso(draft.subscription_renews_at),
+        },
+      });
+      setNotice(`${restaurant.name} subscription updated`);
+      await loadRestaurants();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update subscription");
+    } finally {
+      setActionRestaurantId(null);
+    }
+  }
+
+  function updateSubscriptionDraft(
+    restaurant: PlatformRestaurantSummary,
+    patch: Partial<SubscriptionDraft>,
+  ) {
+    setSubscriptionDrafts((current) => ({
+      ...current,
+      [restaurant.id]: {
+        subscription_status:
+          current[restaurant.id]?.subscription_status ??
+          (restaurant.subscription_status as RestaurantSubscriptionStatus),
+        subscription_started_at:
+          current[restaurant.id]?.subscription_started_at ??
+          toDateInputValue(restaurant.subscription_started_at),
+        subscription_renews_at:
+          current[restaurant.id]?.subscription_renews_at ??
+          toDateInputValue(restaurant.subscription_renews_at),
+        ...patch,
+      },
+    }));
   }
 
   async function createOwnerSetupLink(restaurant: PlatformRestaurantSummary) {
@@ -201,9 +314,11 @@ export function PlatformAdminView({ token }: Props) {
 
       <div className="stats-grid">
         <Stat label="Active restaurants" value={activeRestaurantCount} tone="good" />
+        <Stat label="Today revenue" value={formatMoney(todayRevenue)} tone="good" />
+        <Stat label="Payment attention" value={paymentIssueCount} tone="warn" />
         <Stat label="Setup pending" value={setupPendingCount} />
+        <Stat label="Overdue" value={overdueCount} tone="warn" />
         <Stat label="Suspended" value={suspendedCount} tone="warn" />
-        <Stat label="Tenants listed" value={restaurants.length} />
       </div>
 
       {latestOnboarding || latestOwnerLink ? (
@@ -328,58 +443,204 @@ export function PlatformAdminView({ token }: Props) {
           }
         >
           <div className="tenant-list">
-            {restaurants.map((restaurant) => (
-              <article className="tenant-card" key={restaurant.id}>
-                <span
-                  className={
-                    restaurant.status === "SUSPENDED" ? "status-pill inactive" : "status-pill"
-                  }
-                >
-                  {restaurant.status.replace("_", " ")}
-                </span>
-                <div>
-                  <h3>{restaurant.name}</h3>
-                  <span>{restaurant.code}</span>
-                  <div className="tenant-card-meta">
-                    <span>{restaurant.branch_count} branches</span>
-                    <span>{restaurant.owner_name ?? "No owner"}</span>
-                    <span>{restaurant.owner_email ?? "No owner email"}</span>
+            {restaurants.map((restaurant) => {
+              const subscriptionDraft = subscriptionDrafts[restaurant.id] ?? {
+                subscription_status:
+                  restaurant.subscription_status as RestaurantSubscriptionStatus,
+                subscription_started_at: toDateInputValue(restaurant.subscription_started_at),
+                subscription_renews_at: toDateInputValue(restaurant.subscription_renews_at),
+              };
+              return (
+                <article className="tenant-card" key={restaurant.id}>
+                  <div className="tenant-card-heading">
+                    <span
+                      className={
+                        restaurant.status === "SUSPENDED" ? "status-pill inactive" : "status-pill"
+                      }
+                    >
+                      {restaurant.status.replace("_", " ")}
+                    </span>
+                    <span
+                      className={
+                        restaurant.subscription_status === "OVERDUE" ||
+                        restaurant.subscription_status === "CANCELLED"
+                          ? "status-pill inactive"
+                          : "status-pill"
+                      }
+                    >
+                      {restaurant.subscription_status}
+                    </span>
                   </div>
-                </div>
-                <div className="tenant-card-actions">
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={() => void createOwnerSetupLink(restaurant)}
-                    disabled={actionRestaurantId === restaurant.id}
-                  >
-                    <KeyRound size={17} />
-                    Owner link
-                  </button>
-                  {restaurant.status === "SUSPENDED" ? (
+                  <div className="tenant-card-body">
+                    <h3>{restaurant.name}</h3>
+                    <span>{restaurant.code}</span>
+                    {restaurant.suspension_reason ? (
+                      <p className="tenant-warning">{restaurant.suspension_reason}</p>
+                    ) : null}
+                    {restaurant.owner_setup_expires_at ? (
+                      <p
+                        className={
+                          restaurant.owner_setup_expired
+                            ? "tenant-warning"
+                            : "tenant-helper-text"
+                        }
+                      >
+                        Owner setup expires {formatDateTime(restaurant.owner_setup_expires_at)}
+                      </p>
+                    ) : null}
+                    <div className="tenant-health-grid">
+                      <span>{restaurant.branch_count} branches</span>
+                      <span>{restaurant.active_user_count} users</span>
+                      <span>{restaurant.today_order_count} orders today</span>
+                      <span>{formatMoney(restaurant.today_revenue)} today</span>
+                      <span>{restaurant.pending_payment_count} pending payments</span>
+                      <span>{restaurant.failed_payment_count} failed payments</span>
+                      <span>
+                        {restaurant.critical_stock_alert_count} critical stock alerts
+                      </span>
+                      <span>{restaurant.low_stock_alert_count} low stock alerts</span>
+                    </div>
+                    <div className="tenant-subscription-grid">
+                      <label>
+                        <span>Subscription</span>
+                        <select
+                          value={subscriptionDraft.subscription_status}
+                          onChange={(event) =>
+                            updateSubscriptionDraft(restaurant, {
+                              subscription_status: event.target
+                                .value as RestaurantSubscriptionStatus,
+                            })
+                          }
+                        >
+                          <option value="TRIAL">Trial</option>
+                          <option value="ACTIVE">Active</option>
+                          <option value="OVERDUE">Overdue</option>
+                          <option value="CANCELLED">Cancelled</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Started</span>
+                        <input
+                          type="date"
+                          value={subscriptionDraft.subscription_started_at}
+                          onChange={(event) =>
+                            updateSubscriptionDraft(restaurant, {
+                              subscription_started_at: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Renews</span>
+                        <input
+                          type="date"
+                          value={subscriptionDraft.subscription_renews_at}
+                          onChange={(event) =>
+                            updateSubscriptionDraft(restaurant, {
+                              subscription_renews_at: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={() => void updateSubscription(restaurant)}
+                        disabled={actionRestaurantId === restaurant.id}
+                      >
+                        <CreditCard size={17} />
+                        Save
+                      </button>
+                    </div>
+                    <div className="tenant-card-meta">
+                      <span>{restaurant.owner_name ?? "No owner"}</span>
+                      <span>{restaurant.owner_email ?? "No owner email"}</span>
+                      <span>Last order {formatDateTime(restaurant.last_order_at)}</span>
+                    </div>
+                  </div>
+                  <div className="tenant-card-actions">
                     <button
                       className="secondary-action"
                       type="button"
-                      onClick={() => void updateLifecycle(restaurant, "ACTIVE")}
+                      onClick={() => void createOwnerSetupLink(restaurant)}
                       disabled={actionRestaurantId === restaurant.id}
                     >
-                      <Power size={17} />
-                      Reactivate
+                      <KeyRound size={17} />
+                      Owner link
                     </button>
-                  ) : (
-                    <button
-                      className="secondary-action danger-action"
-                      type="button"
-                      onClick={() => void updateLifecycle(restaurant, "SUSPENDED")}
-                      disabled={actionRestaurantId === restaurant.id}
-                    >
-                      <PowerOff size={17} />
-                      Suspend
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
+                    {restaurant.status === "SUSPENDED" ? (
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={() => void updateLifecycle(restaurant, "ACTIVE")}
+                        disabled={actionRestaurantId === restaurant.id}
+                      >
+                        <Power size={17} />
+                        Reactivate
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary-action danger-action"
+                        type="button"
+                        onClick={() => {
+                          setSuspendingRestaurantId(restaurant.id);
+                          setSuspensionReason("");
+                        }}
+                        disabled={actionRestaurantId === restaurant.id}
+                      >
+                        <PowerOff size={17} />
+                        Suspend
+                      </button>
+                    )}
+                    {suspendingRestaurantId === restaurant.id ? (
+                      <div className="tenant-suspend-box">
+                        <label>
+                          <span>
+                            <AlertTriangle size={15} />
+                            Suspension reason
+                          </span>
+                          <textarea
+                            value={suspensionReason}
+                            onChange={(event) => setSuspensionReason(event.target.value)}
+                            rows={3}
+                            maxLength={300}
+                            required
+                          />
+                        </label>
+                        <div className="tenant-card-actions">
+                          <button
+                            className="secondary-action danger-action"
+                            type="button"
+                            onClick={() =>
+                              void updateLifecycle(
+                                restaurant,
+                                "SUSPENDED",
+                                suspensionReason.trim() || "Suspended by platform admin",
+                              )
+                            }
+                            disabled={actionRestaurantId === restaurant.id}
+                          >
+                            <PowerOff size={17} />
+                            Confirm
+                          </button>
+                          <button
+                            className="secondary-action"
+                            type="button"
+                            onClick={() => {
+                              setSuspendingRestaurantId(null);
+                              setSuspensionReason("");
+                            }}
+                          >
+                            <CalendarDays size={17} />
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
             {!restaurants.length ? <EmptyState>No restaurants onboarded yet</EmptyState> : null}
           </div>
         </Panel>

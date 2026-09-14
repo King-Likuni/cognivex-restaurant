@@ -817,12 +817,19 @@ button:disabled {
 .tenant-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 12px;
   border: 1px solid #d7dde5;
   border-radius: 8px;
   background: #fbfcfd;
   padding: 14px;
+}
+
+.tenant-card-heading,
+.tenant-card-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .tenant-card h3 {
@@ -837,10 +844,23 @@ button:disabled {
 }
 
 .tenant-card-meta,
-.tenant-card-actions {
+.tenant-card-actions,
+.tenant-health-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.tenant-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.tenant-health-grid span {
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
 }
 
 .tenant-card-meta {
@@ -849,6 +869,58 @@ button:disabled {
 
 .tenant-card-actions {
   justify-content: flex-end;
+}
+
+.tenant-subscription-grid {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) repeat(2, minmax(120px, 1fr)) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.tenant-subscription-grid label,
+.tenant-suspend-box label {
+  display: grid;
+  gap: 5px;
+}
+
+.tenant-subscription-grid label > span,
+.tenant-suspend-box label > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #667286;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tenant-warning,
+.tenant-helper-text {
+  margin: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tenant-warning {
+  background: #fff1f1;
+  color: #9b2f2f;
+}
+
+.tenant-helper-text {
+  background: #f0f5fb;
+  color: #27527f;
+}
+
+.tenant-suspend-box {
+  display: grid;
+  width: min(320px, 100%);
+  gap: 8px;
+  border: 1px solid #f0c8c8;
+  border-radius: 8px;
+  background: #fff7f7;
+  padding: 10px;
 }
 
 .password-setup-complete {
@@ -1284,7 +1356,8 @@ button:disabled {
   .audit-change-grid,
   .branch-admin-grid,
   .staff-profile-grid,
-  .staff-edit-grid {
+  .staff-edit-grid,
+  .tenant-subscription-grid {
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;
@@ -1306,6 +1379,10 @@ button:disabled {
 
   .tenant-card-actions {
     justify-content: stretch;
+  }
+
+  .tenant-suspend-box {
+    width: 100%;
   }
 
   .status-steps {

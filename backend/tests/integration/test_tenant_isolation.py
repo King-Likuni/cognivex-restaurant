@@ -228,6 +228,82 @@ def test_admin_can_create_owner_setup_link(
     assert preview_response.json()["email"] == "owner@example.com"
 
 
+def test_admin_can_update_tenant_subscription_status(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    forbidden_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/subscription",
+        headers=owner_headers,
+        json={
+            "subscription_status": "OVERDUE",
+            "subscription_started_at": "2026-09-01T00:00:00Z",
+            "subscription_renews_at": "2026-10-01T00:00:00Z",
+        },
+    )
+    assert forbidden_response.status_code == 403
+
+    response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/subscription",
+        headers=admin_headers,
+        json={
+            "subscription_status": "OVERDUE",
+            "subscription_started_at": "2026-09-01T00:00:00Z",
+            "subscription_renews_at": "2026-10-01T00:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["subscription_status"] == "OVERDUE"
+    assert payload["subscription_started_at"].startswith("2026-09-01")
+    assert payload["subscription_renews_at"].startswith("2026-10-01")
+
+    platform_response = api_client.get("/api/v1/restaurants/platform", headers=admin_headers)
+    assert platform_response.status_code == 200, platform_response.text
+    tenant = next(
+        restaurant for restaurant in platform_response.json() if restaurant["id"] == restaurant_id
+    )
+    assert tenant["subscription_status"] == "OVERDUE"
+
+
+def test_platform_restaurant_summary_includes_tenant_health(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    branch_id = str(seeded_restaurant["branch"].id)
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    ready_order = create_ready_order(api_client, restaurant_id, branch_id, owner_headers)
+    collect_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/{ready_order['id']}/collect",
+        headers=owner_headers,
+    )
+    assert collect_response.status_code == 200, collect_response.text
+
+    platform_response = api_client.get("/api/v1/restaurants/platform", headers=admin_headers)
+
+    assert platform_response.status_code == 200, platform_response.text
+    tenant = next(
+        restaurant for restaurant in platform_response.json() if restaurant["id"] == restaurant_id
+    )
+    assert tenant["branch_count"] == 1
+    assert tenant["active_user_count"] == 1
+    assert tenant["today_order_count"] == 1
+    assert tenant["today_revenue"] == "50.00"
+    assert tenant["pending_payment_count"] == 0
+    assert tenant["failed_payment_count"] == 0
+    assert tenant["low_stock_alert_count"] == 0
+    assert tenant["critical_stock_alert_count"] == 0
+    assert tenant["last_order_at"] is not None
+
+
 def create_ready_order(
     client: TestClient,
     restaurant_id: str,

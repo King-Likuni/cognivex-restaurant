@@ -1,9 +1,11 @@
 """Tenant service: business logic for restaurant and branch management."""
 
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.audit.models import AuditLog
@@ -16,6 +18,10 @@ from app.auth.service import (
     user_audit_values,
 )
 from app.core.security import get_password_hash
+from app.inventory import service as inventory_service
+from app.orders.enums import OrderStatus, PaymentStatus
+from app.orders.models import Order
+from app.payments.models import Payment
 from app.tenants.models import Branch, Restaurant, RestaurantSettings
 from app.tenants.schemas import (
     BranchCreate,
@@ -24,12 +30,27 @@ from app.tenants.schemas import (
     RestaurantCreate,
     RestaurantOnboardingCreate,
     RestaurantSettingsUpdate,
+    RestaurantSubscriptionUpdate,
 )
 
 TENANT_SETUP_PENDING = "SETUP_PENDING"
 TENANT_ACTIVE = "ACTIVE"
 TENANT_SUSPENDED = "SUSPENDED"
 TENANT_LIFECYCLE_STATUSES = {TENANT_SETUP_PENDING, TENANT_ACTIVE, TENANT_SUSPENDED}
+SUBSCRIPTION_TRIAL = "TRIAL"
+SUBSCRIPTION_ACTIVE = "ACTIVE"
+SUBSCRIPTION_OVERDUE = "OVERDUE"
+SUBSCRIPTION_CANCELLED = "CANCELLED"
+SUBSCRIPTION_STATUSES = {
+    SUBSCRIPTION_TRIAL,
+    SUBSCRIPTION_ACTIVE,
+    SUBSCRIPTION_OVERDUE,
+    SUBSCRIPTION_CANCELLED,
+}
+
+
+def money(value: Decimal | int | None) -> Decimal:
+    return Decimal(value or 0).quantize(Decimal("0.01"))
 
 
 def normalize_code(value: str) -> str:
@@ -117,6 +138,8 @@ def create_restaurant_onboarding(
             name=data.restaurant_name,
             code=unique_restaurant_code(db, preferred_restaurant_code),
             status=TENANT_SETUP_PENDING,
+            subscription_status=SUBSCRIPTION_TRIAL,
+            subscription_started_at=datetime.now(UTC),
             is_active=True,
         )
         db.add(restaurant)
@@ -224,6 +247,7 @@ def list_restaurants(db: Session) -> list[Restaurant]:
 
 
 def platform_restaurant_summary(db: Session, restaurant: Restaurant) -> PlatformRestaurantSummary:
+    today = date.today()
     owner = (
         db.query(User)
         .join(Role)
@@ -240,15 +264,98 @@ def platform_restaurant_summary(db: Session, restaurant: Restaurant) -> Platform
     if owner is not None:
         owner_name = f"{owner.first_name or ''} {owner.last_name or ''}".strip() or owner.email
 
+    owner_setup_token = None
+    if owner is not None:
+        owner_setup_token = (
+            db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.user_id == owner.id,
+                PasswordResetToken.purpose == TOKEN_PURPOSE_INVITE,
+                PasswordResetToken.used_at.is_(None),
+            )
+            .order_by(PasswordResetToken.expires_at.desc())
+            .first()
+        )
+
+    active_user_count = (
+        db.query(User).filter(User.restaurant_id == restaurant.id, User.is_active.is_(True)).count()
+    )
+    today_orders_query = db.query(Order).filter(
+        Order.restaurant_id == restaurant.id,
+        Order.business_date == today,
+    )
+    today_order_count = today_orders_query.count()
+    today_revenue = money(
+        db.query(func.coalesce(func.sum(Order.total), 0))
+        .filter(
+            Order.restaurant_id == restaurant.id,
+            Order.business_date == today,
+            Order.payment_status == PaymentStatus.PAID.value,
+            Order.order_status == OrderStatus.COLLECTED.value,
+        )
+        .scalar()
+    )
+    pending_payment_count = today_orders_query.filter(
+        Order.payment_status == PaymentStatus.PENDING.value,
+        Order.order_status.notin_(
+            [
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAYMENT_EXPIRED.value,
+                OrderStatus.COLLECTED.value,
+            ]
+        ),
+    ).count()
+    failed_payment_count = (
+        db.query(Payment)
+        .join(Order, Order.id == Payment.order_id)
+        .filter(
+            Payment.restaurant_id == restaurant.id,
+            Order.business_date == today,
+            Payment.status.in_([PaymentStatus.FAILED.value, PaymentStatus.EXPIRED.value]),
+        )
+        .count()
+    )
+    last_order_at = (
+        db.query(func.max(Order.created_at)).filter(Order.restaurant_id == restaurant.id).scalar()
+    )
+    low_stock_alert_count = 0
+    critical_stock_alert_count = 0
+    for branch in list_branches(db, restaurant.id, include_inactive=False):
+        for _, _, severity, _ in inventory_service.list_low_stock_alerts(
+            db,
+            restaurant.id,
+            branch.id,
+        ):
+            if severity == "CRITICAL":
+                critical_stock_alert_count += 1
+            else:
+                low_stock_alert_count += 1
+
     return PlatformRestaurantSummary(
         id=restaurant.id,
         code=restaurant.code,
         name=restaurant.name,
         status=restaurant.status,
+        subscription_status=restaurant.subscription_status,
+        subscription_started_at=restaurant.subscription_started_at,
+        subscription_renews_at=restaurant.subscription_renews_at,
+        suspension_reason=restaurant.suspension_reason,
         is_active=restaurant.is_active,
         branch_count=branch_count,
+        active_user_count=active_user_count,
         owner_email=owner.email if owner else None,
         owner_name=owner_name,
+        owner_setup_expires_at=owner_setup_token.expires_at if owner_setup_token else None,
+        owner_setup_expired=(
+            owner_setup_token is not None and owner_setup_token.expires_at <= datetime.now(UTC)
+        ),
+        today_order_count=today_order_count,
+        today_revenue=today_revenue,
+        pending_payment_count=pending_payment_count,
+        failed_payment_count=failed_payment_count,
+        low_stock_alert_count=low_stock_alert_count,
+        critical_stock_alert_count=critical_stock_alert_count,
+        last_order_at=last_order_at,
         created_at=restaurant.created_at,
     )
 
@@ -266,6 +373,7 @@ def update_restaurant_lifecycle(
     status: str,
     *,
     changed_by: User,
+    suspension_reason: str | None = None,
 ) -> Restaurant | None:
     restaurant = get_restaurant(db, restaurant_id)
     if restaurant is None:
@@ -278,9 +386,15 @@ def update_restaurant_lifecycle(
     previous_values = {
         "status": restaurant.status,
         "is_active": restaurant.is_active,
+        "suspension_reason": restaurant.suspension_reason,
     }
     restaurant.status = normalized_status
     restaurant.is_active = normalized_status != TENANT_SUSPENDED
+    restaurant.suspension_reason = (
+        suspension_reason.strip()
+        if normalized_status == TENANT_SUSPENDED and suspension_reason
+        else None
+    )
     db.add(
         AuditLog(
             restaurant_id=restaurant.id,
@@ -292,6 +406,58 @@ def update_restaurant_lifecycle(
             new_values={
                 "status": restaurant.status,
                 "is_active": restaurant.is_active,
+                "suspension_reason": restaurant.suspension_reason,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(restaurant)
+    return restaurant
+
+
+def update_restaurant_subscription(
+    db: Session,
+    restaurant_id: UUID,
+    data: RestaurantSubscriptionUpdate,
+    *,
+    changed_by: User,
+) -> Restaurant | None:
+    restaurant = get_restaurant(db, restaurant_id)
+    if restaurant is None:
+        return None
+
+    normalized_status = data.subscription_status.strip().upper()
+    if normalized_status not in SUBSCRIPTION_STATUSES:
+        raise ValueError("Subscription status is not valid")
+
+    old_values = {
+        "subscription_status": restaurant.subscription_status,
+        "subscription_started_at": restaurant.subscription_started_at.isoformat()
+        if restaurant.subscription_started_at
+        else None,
+        "subscription_renews_at": restaurant.subscription_renews_at.isoformat()
+        if restaurant.subscription_renews_at
+        else None,
+    }
+    restaurant.subscription_status = normalized_status
+    restaurant.subscription_started_at = data.subscription_started_at
+    restaurant.subscription_renews_at = data.subscription_renews_at
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant.id,
+            user_id=changed_by.id,
+            action="RESTAURANT_SUBSCRIPTION_UPDATED",
+            entity_type="restaurant",
+            entity_id=restaurant.id,
+            old_values=old_values,
+            new_values={
+                "subscription_status": restaurant.subscription_status,
+                "subscription_started_at": restaurant.subscription_started_at.isoformat()
+                if restaurant.subscription_started_at
+                else None,
+                "subscription_renews_at": restaurant.subscription_renews_at.isoformat()
+                if restaurant.subscription_renews_at
+                else None,
             },
         )
     )

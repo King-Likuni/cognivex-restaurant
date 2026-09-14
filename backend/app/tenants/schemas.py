@@ -23,6 +23,10 @@ class RestaurantResponse(BaseModel):
     code: str
     name: str
     status: str = "ACTIVE"
+    subscription_status: str = "TRIAL"
+    subscription_started_at: datetime | None = None
+    subscription_renews_at: datetime | None = None
+    suspension_reason: str | None = None
     is_active: bool
     created_at: datetime | None = None
 
@@ -76,6 +80,13 @@ class RestaurantOnboardingResponse(BaseModel):
 
 class RestaurantLifecycleUpdate(BaseModel):
     status: Literal["ACTIVE", "SUSPENDED"]
+    suspension_reason: str | None = Field(default=None, max_length=300)
+
+
+class RestaurantSubscriptionUpdate(BaseModel):
+    subscription_status: Literal["TRIAL", "ACTIVE", "OVERDUE", "CANCELLED"]
+    subscription_started_at: datetime | None = None
+    subscription_renews_at: datetime | None = None
 
 
 class PlatformRestaurantSummary(BaseModel):
@@ -83,10 +94,24 @@ class PlatformRestaurantSummary(BaseModel):
     code: str
     name: str
     status: str
+    subscription_status: str
+    subscription_started_at: datetime | None
+    subscription_renews_at: datetime | None
+    suspension_reason: str | None
     is_active: bool
     branch_count: int
+    active_user_count: int
     owner_email: str | None
     owner_name: str | None
+    owner_setup_expires_at: datetime | None
+    owner_setup_expired: bool
+    today_order_count: int
+    today_revenue: Decimal
+    pending_payment_count: int
+    failed_payment_count: int
+    low_stock_alert_count: int
+    critical_stock_alert_count: int
+    last_order_at: datetime | None
     created_at: datetime | None
 
 

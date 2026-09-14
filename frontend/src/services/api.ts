@@ -47,16 +47,31 @@ export type Restaurant = {
   code: string;
   name: string;
   status: "SETUP_PENDING" | "ACTIVE" | "SUSPENDED" | string;
+  subscription_status: "TRIAL" | "ACTIVE" | "OVERDUE" | "CANCELLED" | string;
+  subscription_started_at: string | null;
+  subscription_renews_at: string | null;
+  suspension_reason: string | null;
   is_active: boolean;
   created_at: string | null;
 };
 
 export type RestaurantLifecycleStatus = "ACTIVE" | "SUSPENDED";
+export type RestaurantSubscriptionStatus = "TRIAL" | "ACTIVE" | "OVERDUE" | "CANCELLED";
 
 export type PlatformRestaurantSummary = Restaurant & {
   branch_count: number;
+  active_user_count: number;
   owner_email: string | null;
   owner_name: string | null;
+  owner_setup_expires_at: string | null;
+  owner_setup_expired: boolean;
+  today_order_count: number;
+  today_revenue: string;
+  pending_payment_count: number;
+  failed_payment_count: number;
+  low_stock_alert_count: number;
+  critical_stock_alert_count: number;
+  last_order_at: string | null;
 };
 
 export type Branch = {

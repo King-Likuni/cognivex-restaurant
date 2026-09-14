@@ -24,6 +24,10 @@ class Restaurant(Base):
     code = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, index=True, nullable=False)
     status = Column(String, default="ACTIVE", nullable=False)
+    subscription_status = Column(String, default="TRIAL", nullable=False)
+    subscription_started_at = Column(DateTime(timezone=True), nullable=True)
+    subscription_renews_at = Column(DateTime(timezone=True), nullable=True)
+    suspension_reason = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
