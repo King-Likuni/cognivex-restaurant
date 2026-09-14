@@ -60,3 +60,29 @@ def list_audit_logs(
         )
 
     return query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit).all()
+
+
+def list_platform_audit_logs(
+    db: Session,
+    *,
+    action: str | None = None,
+    entity_type: str | None = None,
+    user_id: UUID | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 100,
+) -> list[tuple[AuditLog, User | None]]:
+    query = db.query(AuditLog, User).outerjoin(User, AuditLog.user_id == User.id)
+
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if entity_type:
+        query = query.filter(AuditLog.entity_type == entity_type)
+    if user_id:
+        query = query.filter(AuditLog.user_id == user_id)
+    if date_from:
+        query = query.filter(AuditLog.created_at >= start_of_day(date_from))
+    if date_to:
+        query = query.filter(AuditLog.created_at <= end_of_day(date_to))
+
+    return query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit).all()

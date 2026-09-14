@@ -832,6 +832,11 @@ button:disabled {
   min-width: 0;
 }
 
+.tenant-card-health,
+.tenant-card-subscription {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
 .tenant-card h3 {
   margin: 0;
   font-size: 18px;

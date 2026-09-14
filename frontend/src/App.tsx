@@ -24,7 +24,7 @@ import { InventoryView } from "./manager/InventoryView";
 import { DashboardView } from "./manager/DashboardView";
 import { StaffManagementView } from "./manager/StaffManagementView";
 import { KitchenView } from "./kitchen/KitchenView";
-import { PlatformAdminView } from "./platform/PlatformAdminView";
+import { PlatformAdminView, type PlatformAdminModule } from "./platform/PlatformAdminView";
 import {
   apiRequest,
   login,
@@ -45,7 +45,10 @@ export type AppContext = {
 };
 
 type ViewKey =
-  | "platform"
+  | "platform-tenants"
+  | "platform-subscriptions"
+  | "platform-health"
+  | "platform-audit"
   | "cashier"
   | "kitchen"
   | "inventory"
@@ -58,7 +61,10 @@ const STORAGE_KEY = "cognivex.session";
 const BRANCH_STORAGE_KEY = "cognivex.branchId";
 
 const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = [
-  { key: "platform", label: "Platform", icon: Store },
+  { key: "platform-tenants", label: "Tenants", icon: Store },
+  { key: "platform-subscriptions", label: "Subscriptions", icon: CreditCard },
+  { key: "platform-health", label: "Tenant Health", icon: BarChart3 },
+  { key: "platform-audit", label: "Platform Audit", icon: ClipboardList },
   { key: "cashier", label: "Cashier", icon: ShoppingCart },
   { key: "kitchen", label: "Kitchen", icon: ChefHat },
   { key: "inventory", label: "Inventory", icon: Boxes },
@@ -69,12 +75,19 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
 ];
 
 const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
-  ADMIN: ["platform"],
+  ADMIN: ["platform-tenants", "platform-subscriptions", "platform-health", "platform-audit"],
   OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier", "kitchen", "inventory", "dashboard"],
   KITCHEN: ["cashier", "kitchen"],
   INVENTORY: ["inventory"],
+};
+
+const PLATFORM_MODULE_BY_VIEW: Partial<Record<ViewKey, PlatformAdminModule>> = {
+  "platform-tenants": "tenants",
+  "platform-subscriptions": "subscriptions",
+  "platform-health": "health",
+  "platform-audit": "audit",
 };
 
 function isPlaceholderBranch(branch: Branch) {
@@ -228,13 +241,25 @@ function OperationsApp() {
 
   const title = useMemo(() => {
     if (session?.user.role_name === "ADMIN") {
+      if (view === "platform-tenants") {
+        return "Platform / Tenants";
+      }
+      if (view === "platform-subscriptions") {
+        return "Platform / Subscriptions";
+      }
+      if (view === "platform-health") {
+        return "Platform / Tenant Health";
+      }
+      if (view === "platform-audit") {
+        return "Platform / Audit";
+      }
       return "Platform Admin Console";
     }
     if (!context) {
       return "Operations Console";
     }
     return `${context.restaurant.name} / ${context.branch.name}`;
-  }, [context, session?.user.role_name]);
+  }, [context, session?.user.role_name, view]);
 
   if (!session) {
     return <LoginScreen onLogin={setSession} />;
@@ -255,6 +280,8 @@ function OperationsApp() {
     localStorage.setItem(BRANCH_STORAGE_KEY, selectedBranch.id);
     setContext({ ...context, branch: selectedBranch });
   }
+
+  const platformModule = PLATFORM_MODULE_BY_VIEW[view];
 
   return (
     <main className="app-shell">
@@ -334,8 +361,8 @@ function OperationsApp() {
                 This account does not have an operational console role assigned.
               </Notice>
             ) : null}
-            {view === "platform" && visibleNavItems.some((item) => item.key === "platform") ? (
-              <PlatformAdminView token={token} />
+            {platformModule && visibleNavItems.some((item) => item.key === view) ? (
+              <PlatformAdminView token={token} module={platformModule} />
             ) : null}
             {view === "cashier" && visibleNavItems.some((item) => item.key === "cashier") ? (
               context ? <CashierView context={context} token={token} /> : null

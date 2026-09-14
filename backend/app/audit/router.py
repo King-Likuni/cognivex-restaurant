@@ -10,9 +10,10 @@ from app.audit import service
 from app.audit.schemas import AuditLogResponse
 from app.auth.models import User
 from app.core.database import get_db
-from app.core.dependencies import RoleChecker, ensure_restaurant_access
+from app.core.dependencies import RoleChecker, ensure_restaurant_access, require_admin
 
 router = APIRouter(prefix="/restaurants/{restaurant_id}/audit-logs", tags=["Audit"])
+platform_router = APIRouter(prefix="/platform/audit-logs", tags=["Platform Audit"])
 require_audit_reader = RoleChecker(["ADMIN", "OWNER"])
 
 
@@ -73,6 +74,30 @@ def list_audit_logs(
         entity_type=entity_type,
         user_id=user_id,
         branch_id=branch_id,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+    )
+    return [serialize_audit_row(row) for row in rows]
+
+
+@platform_router.get("/", response_model=list[AuditLogResponse])
+def list_platform_audit_logs(
+    action: str | None = None,
+    entity_type: str | None = None,
+    user_id: UUID | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """List platform-wide audit history. Platform admins only."""
+    rows = service.list_platform_audit_logs(
+        db,
+        action=action,
+        entity_type=entity_type,
+        user_id=user_id,
         date_from=date_from,
         date_to=date_to,
         limit=limit,

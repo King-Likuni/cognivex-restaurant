@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 import app.models  # noqa: F401
+from app.audit.router import platform_router as platform_audit_router
 from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
 from app.core.config import settings
@@ -68,5 +69,6 @@ app.include_router(payment_webhook_router, prefix=settings.API_V1_STR)
 app.include_router(kitchen_router, prefix=settings.API_V1_STR)
 app.include_router(reports_router, prefix=settings.API_V1_STR)
 app.include_router(audit_router, prefix=settings.API_V1_STR)
+app.include_router(platform_audit_router, prefix=settings.API_V1_STR)
 app.include_router(public_router, prefix=settings.API_V1_STR)
 app.include_router(realtime_router)

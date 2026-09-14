@@ -270,6 +270,21 @@ def test_admin_can_update_tenant_subscription_status(
     )
     assert tenant["subscription_status"] == "OVERDUE"
 
+    forbidden_audit_response = api_client.get(
+        "/api/v1/platform/audit-logs/",
+        headers=owner_headers,
+    )
+    assert forbidden_audit_response.status_code == 403
+
+    audit_response = api_client.get(
+        "/api/v1/platform/audit-logs/",
+        headers=admin_headers,
+        params={"action": "RESTAURANT_SUBSCRIPTION_UPDATED"},
+    )
+    assert audit_response.status_code == 200, audit_response.text
+    assert audit_response.json()[0]["restaurant_id"] == restaurant_id
+    assert audit_response.json()[0]["action"] == "RESTAURANT_SUBSCRIPTION_UPDATED"
+
 
 def test_platform_restaurant_summary_includes_tenant_health(
     api_client: TestClient,

@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Building2,
   CalendarDays,
+  ClipboardList,
   Copy,
   CreditCard,
   KeyRound,
@@ -17,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { EmptyState, Field, Notice, Panel, Stat } from "../components/ui";
 import {
   apiRequest,
+  type AuditLog,
   type PasswordSetupToken,
   type PlatformRestaurantSummary,
   type RestaurantLifecycleStatus,
@@ -24,8 +26,11 @@ import {
   type RestaurantSubscriptionStatus,
 } from "../services/api";
 
+export type PlatformAdminModule = "tenants" | "subscriptions" | "health" | "audit";
+
 type Props = {
   token: string;
+  module: PlatformAdminModule;
 };
 
 type OnboardingForm = {
@@ -56,8 +61,28 @@ const EMPTY_FORM: OnboardingForm = {
   owner_last_name: "",
 };
 
+const PLATFORM_AUDIT_ACTIONS = [
+  "RESTAURANT_ONBOARDED",
+  "OWNER_INVITED",
+  "PASSWORD_SETUP_LINK_CREATED",
+  "RESTAURANT_LIFECYCLE_UPDATED",
+  "RESTAURANT_SUBSCRIPTION_UPDATED",
+  "BRANCH_CREATED",
+  "BRANCH_UPDATED",
+];
+
+const PLATFORM_AUDIT_ENTITIES = ["restaurant", "branch", "user"];
+
 function setupUrlFromInvite(invite: RestaurantOnboardingResponse["invite"]) {
   return `${window.location.origin}${invite.setup_url_path}`;
+}
+
+function formatAction(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatMoney(value: string | number) {
@@ -85,8 +110,25 @@ function dateInputToIso(value: string) {
   return value ? new Date(`${value}T00:00:00`).toISOString() : null;
 }
 
-export function PlatformAdminView({ token }: Props) {
+function summarizeValues(values: Record<string, unknown> | null) {
+  if (!values) {
+    return "None";
+  }
+  return Object.entries(values)
+    .slice(0, 6)
+    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.length : String(value)}`)
+    .join(" | ");
+}
+
+function statusPillClass(status: string) {
+  return status === "SUSPENDED" || status === "OVERDUE" || status === "CANCELLED"
+    ? "status-pill inactive"
+    : "status-pill";
+}
+
+export function PlatformAdminView({ token, module }: Props) {
   const [restaurants, setRestaurants] = useState<PlatformRestaurantSummary[]>([]);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [form, setForm] = useState<OnboardingForm>(EMPTY_FORM);
   const [latestOnboarding, setLatestOnboarding] = useState<RestaurantOnboardingResponse | null>(
     null,
@@ -102,7 +144,15 @@ export function PlatformAdminView({ token }: Props) {
   const [subscriptionDrafts, setSubscriptionDrafts] = useState<Record<string, SubscriptionDraft>>(
     {},
   );
+  const [auditAction, setAuditAction] = useState("");
+  const [auditEntityType, setAuditEntityType] = useState("");
+  const [auditDateFrom, setAuditDateFrom] = useState("");
+  const [auditDateTo, setAuditDateTo] = useState("");
 
+  const tenantNameById = useMemo(
+    () => new Map(restaurants.map((restaurant) => [restaurant.id, restaurant.name])),
+    [restaurants],
+  );
   const activeRestaurantCount = useMemo(
     () => restaurants.filter((restaurant) => restaurant.status === "ACTIVE").length,
     [restaurants],
@@ -115,24 +165,35 @@ export function PlatformAdminView({ token }: Props) {
     () => restaurants.filter((restaurant) => restaurant.status === "SUSPENDED").length,
     [restaurants],
   );
-  const overdueCount = useMemo(
-    () => restaurants.filter((restaurant) => restaurant.subscription_status === "OVERDUE").length,
+  const subscriptionCounts = useMemo(
+    () => ({
+      trial: restaurants.filter((restaurant) => restaurant.subscription_status === "TRIAL").length,
+      active: restaurants.filter((restaurant) => restaurant.subscription_status === "ACTIVE")
+        .length,
+      overdue: restaurants.filter((restaurant) => restaurant.subscription_status === "OVERDUE")
+        .length,
+      cancelled: restaurants.filter(
+        (restaurant) => restaurant.subscription_status === "CANCELLED",
+      ).length,
+    }),
     [restaurants],
   );
-  const todayRevenue = useMemo(
+  const healthTotals = useMemo(
     () =>
       restaurants.reduce(
-        (total, restaurant) => total + Number(restaurant.today_revenue || 0),
-        0,
-      ),
-    [restaurants],
-  );
-  const paymentIssueCount = useMemo(
-    () =>
-      restaurants.reduce(
-        (total, restaurant) =>
-          total + restaurant.pending_payment_count + restaurant.failed_payment_count,
-        0,
+        (totals, restaurant) => ({
+          orders: totals.orders + restaurant.today_order_count,
+          revenue: totals.revenue + Number(restaurant.today_revenue || 0),
+          paymentAttention:
+            totals.paymentAttention +
+            restaurant.pending_payment_count +
+            restaurant.failed_payment_count,
+          stockAlerts:
+            totals.stockAlerts +
+            restaurant.low_stock_alert_count +
+            restaurant.critical_stock_alert_count,
+        }),
+        { orders: 0, revenue: 0, paymentAttention: 0, stockAlerts: 0 },
       ),
     [restaurants],
   );
@@ -153,9 +214,37 @@ export function PlatformAdminView({ token }: Props) {
     }
   }, [token]);
 
+  const loadLogs = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const nextLogs = await apiRequest<AuditLog[]>("/api/v1/platform/audit-logs/", {
+        token,
+        params: {
+          action: auditAction,
+          entity_type: auditEntityType,
+          date_from: auditDateFrom,
+          date_to: auditDateTo,
+          limit: 100,
+        },
+      });
+      setLogs(nextLogs);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load platform audit");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [auditAction, auditDateFrom, auditDateTo, auditEntityType, token]);
+
   useEffect(() => {
     void loadRestaurants();
   }, [loadRestaurants]);
+
+  useEffect(() => {
+    if (module === "audit") {
+      void loadLogs();
+    }
+  }, [loadLogs, module]);
 
   function updateField<K extends keyof OnboardingForm>(field: K, value: OnboardingForm[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -306,138 +395,273 @@ export function PlatformAdminView({ token }: Props) {
     }
   }
 
-  return (
-    <div className="view-stack">
-      {error ? <Notice tone="error">{error}</Notice> : null}
-      {notice ? <Notice tone="success">{notice}</Notice> : null}
-      {isLoading ? <Notice>Loading platform tenants</Notice> : null}
-
-      <div className="stats-grid">
-        <Stat label="Active restaurants" value={activeRestaurantCount} tone="good" />
-        <Stat label="Today revenue" value={formatMoney(todayRevenue)} tone="good" />
-        <Stat label="Payment attention" value={paymentIssueCount} tone="warn" />
-        <Stat label="Setup pending" value={setupPendingCount} />
-        <Stat label="Overdue" value={overdueCount} tone="warn" />
-        <Stat label="Suspended" value={suspendedCount} tone="warn" />
-      </div>
-
-      {latestOnboarding || latestOwnerLink ? (
-        <Panel title="Owner Setup Link">
-          <div className="invite-link-box">
-            <input
-              readOnly
-              value={setupUrlFromInvite(latestOwnerLink ?? latestOnboarding!.invite)}
-            />
-            <button className="secondary-action" type="button" onClick={copySetupUrl}>
-              <Copy size={17} />
-              Copy
-            </button>
+  function renderOwnerSetupLink() {
+    if (!latestOnboarding && !latestOwnerLink) {
+      return null;
+    }
+    return (
+      <Panel title="Owner Setup Link">
+        <div className="invite-link-box">
+          <input readOnly value={setupUrlFromInvite(latestOwnerLink ?? latestOnboarding!.invite)} />
+          <button className="secondary-action" type="button" onClick={copySetupUrl}>
+            <Copy size={17} />
+            Copy
+          </button>
+        </div>
+        {latestOnboarding ? (
+          <div className="tenant-summary">
+            <span>{latestOnboarding.restaurant.name}</span>
+            <span>{latestOnboarding.branch.name}</span>
+            <span>{latestOnboarding.owner.email}</span>
           </div>
-          {latestOnboarding ? (
-            <div className="tenant-summary">
-              <span>{latestOnboarding.restaurant.name}</span>
-              <span>{latestOnboarding.branch.name}</span>
-              <span>{latestOnboarding.owner.email}</span>
-            </div>
-          ) : null}
-        </Panel>
-      ) : null}
+        ) : null}
+      </Panel>
+    );
+  }
 
-      <div className="view-grid two-columns">
-        <Panel title="Add Restaurant">
-          <form className="tenant-onboarding-form" onSubmit={onboardRestaurant}>
-            <div className="form-section-title">
-              <Store size={17} />
-              Restaurant
+  function renderTenantActions(restaurant: PlatformRestaurantSummary) {
+    return (
+      <div className="tenant-card-actions">
+        <button
+          className="secondary-action"
+          type="button"
+          onClick={() => void createOwnerSetupLink(restaurant)}
+          disabled={actionRestaurantId === restaurant.id}
+        >
+          <KeyRound size={17} />
+          Owner link
+        </button>
+        {restaurant.status === "SUSPENDED" ? (
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => void updateLifecycle(restaurant, "ACTIVE")}
+            disabled={actionRestaurantId === restaurant.id}
+          >
+            <Power size={17} />
+            Reactivate
+          </button>
+        ) : (
+          <button
+            className="secondary-action danger-action"
+            type="button"
+            onClick={() => {
+              setSuspendingRestaurantId(restaurant.id);
+              setSuspensionReason("");
+            }}
+            disabled={actionRestaurantId === restaurant.id}
+          >
+            <PowerOff size={17} />
+            Suspend
+          </button>
+        )}
+        {suspendingRestaurantId === restaurant.id ? (
+          <div className="tenant-suspend-box">
+            <label>
+              <span>
+                <AlertTriangle size={15} />
+                Suspension reason
+              </span>
+              <textarea
+                value={suspensionReason}
+                onChange={(event) => setSuspensionReason(event.target.value)}
+                rows={3}
+                maxLength={300}
+                required
+              />
+            </label>
+            <div className="tenant-card-actions">
+              <button
+                className="secondary-action danger-action"
+                type="button"
+                onClick={() =>
+                  void updateLifecycle(
+                    restaurant,
+                    "SUSPENDED",
+                    suspensionReason.trim() || "Suspended by platform admin",
+                  )
+                }
+                disabled={actionRestaurantId === restaurant.id}
+              >
+                <PowerOff size={17} />
+                Confirm
+              </button>
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => {
+                  setSuspendingRestaurantId(null);
+                  setSuspensionReason("");
+                }}
+              >
+                <CalendarDays size={17} />
+                Cancel
+              </button>
             </div>
-            <Field label="Restaurant name">
-              <input
-                value={form.restaurant_name}
-                onChange={(event) => updateField("restaurant_name", event.target.value)}
-                placeholder="KFC"
-                required
-              />
-            </Field>
-            <Field label="Restaurant code">
-              <input
-                value={form.restaurant_code}
-                onChange={(event) => updateField("restaurant_code", event.target.value)}
-                placeholder="KFC"
-                maxLength={12}
-              />
-            </Field>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
-            <div className="form-section-title">
-              <Building2 size={17} />
-              First branch
+  function renderTenantsModule() {
+    return (
+      <>
+        <div className="stats-grid">
+          <Stat label="Active restaurants" value={activeRestaurantCount} tone="good" />
+          <Stat label="Setup pending" value={setupPendingCount} />
+          <Stat label="Suspended" value={suspendedCount} tone="warn" />
+          <Stat label="Tenants listed" value={restaurants.length} />
+        </div>
+        {renderOwnerSetupLink()}
+        <div className="view-grid two-columns">
+          <Panel title="Add Restaurant">
+            <form className="tenant-onboarding-form" onSubmit={onboardRestaurant}>
+              <div className="form-section-title">
+                <Store size={17} />
+                Restaurant
+              </div>
+              <Field label="Restaurant name">
+                <input
+                  value={form.restaurant_name}
+                  onChange={(event) => updateField("restaurant_name", event.target.value)}
+                  placeholder="KFC"
+                  required
+                />
+              </Field>
+              <Field label="Restaurant code">
+                <input
+                  value={form.restaurant_code}
+                  onChange={(event) => updateField("restaurant_code", event.target.value)}
+                  placeholder="KFC"
+                  maxLength={12}
+                />
+              </Field>
+              <div className="form-section-title">
+                <Building2 size={17} />
+                First branch
+              </div>
+              <Field label="Branch name">
+                <input
+                  value={form.branch_name}
+                  onChange={(event) => updateField("branch_name", event.target.value)}
+                  placeholder="Main Mall"
+                  required
+                />
+              </Field>
+              <Field label="Branch code">
+                <input
+                  value={form.branch_code}
+                  onChange={(event) => updateField("branch_code", event.target.value)}
+                  placeholder="MM"
+                  maxLength={12}
+                />
+              </Field>
+              <Field label="Branch location">
+                <input
+                  value={form.branch_location}
+                  onChange={(event) => updateField("branch_location", event.target.value)}
+                  placeholder="Gaborone"
+                />
+              </Field>
+              <div className="form-section-title">
+                <UserPlus size={17} />
+                Owner
+              </div>
+              <Field label="Owner email">
+                <input
+                  type="email"
+                  value={form.owner_email}
+                  onChange={(event) => updateField("owner_email", event.target.value)}
+                  placeholder="owner@example.com"
+                  required
+                />
+              </Field>
+              <Field label="First name">
+                <input
+                  value={form.owner_first_name}
+                  onChange={(event) => updateField("owner_first_name", event.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Last name">
+                <input
+                  value={form.owner_last_name}
+                  onChange={(event) => updateField("owner_last_name", event.target.value)}
+                  required
+                />
+              </Field>
+              <button className="primary-action" type="submit" disabled={isSubmitting}>
+                <Plus size={18} />
+                {isSubmitting ? "Creating tenant" : "Create tenant"}
+              </button>
+            </form>
+          </Panel>
+          <Panel
+            title="Tenants"
+            action={
+              <button className="icon-button" type="button" onClick={loadRestaurants}>
+                <RefreshCw size={17} />
+              </button>
+            }
+          >
+            <div className="tenant-list">
+              {restaurants.map((restaurant) => (
+                <article className="tenant-card tenant-card-compact" key={restaurant.id}>
+                  <div className="tenant-card-heading">
+                    <span className={statusPillClass(restaurant.status)}>
+                      {restaurant.status.replace("_", " ")}
+                    </span>
+                    <span className={statusPillClass(restaurant.subscription_status)}>
+                      {restaurant.subscription_status}
+                    </span>
+                  </div>
+                  <div className="tenant-card-body">
+                    <h3>{restaurant.name}</h3>
+                    <span>{restaurant.code}</span>
+                    {restaurant.suspension_reason ? (
+                      <p className="tenant-warning">{restaurant.suspension_reason}</p>
+                    ) : null}
+                    {restaurant.owner_setup_expires_at ? (
+                      <p
+                        className={
+                          restaurant.owner_setup_expired ? "tenant-warning" : "tenant-helper-text"
+                        }
+                      >
+                        Owner setup expires {formatDateTime(restaurant.owner_setup_expires_at)}
+                      </p>
+                    ) : null}
+                    <div className="tenant-card-meta">
+                      <span>{restaurant.branch_count} branches</span>
+                      <span>{restaurant.active_user_count} users</span>
+                      <span>{restaurant.owner_name ?? "No owner"}</span>
+                      <span>{restaurant.owner_email ?? "No owner email"}</span>
+                    </div>
+                  </div>
+                  {renderTenantActions(restaurant)}
+                </article>
+              ))}
+              {!restaurants.length ? <EmptyState>No restaurants onboarded yet</EmptyState> : null}
             </div>
-            <Field label="Branch name">
-              <input
-                value={form.branch_name}
-                onChange={(event) => updateField("branch_name", event.target.value)}
-                placeholder="Main Mall"
-                required
-              />
-            </Field>
-            <Field label="Branch code">
-              <input
-                value={form.branch_code}
-                onChange={(event) => updateField("branch_code", event.target.value)}
-                placeholder="MM"
-                maxLength={12}
-              />
-            </Field>
-            <Field label="Branch location">
-              <input
-                value={form.branch_location}
-                onChange={(event) => updateField("branch_location", event.target.value)}
-                placeholder="Gaborone"
-              />
-            </Field>
+          </Panel>
+        </div>
+      </>
+    );
+  }
 
-            <div className="form-section-title">
-              <UserPlus size={17} />
-              Owner
-            </div>
-            <Field label="Owner email">
-              <input
-                type="email"
-                value={form.owner_email}
-                onChange={(event) => updateField("owner_email", event.target.value)}
-                placeholder="owner@example.com"
-                required
-              />
-            </Field>
-            <Field label="First name">
-              <input
-                value={form.owner_first_name}
-                onChange={(event) => updateField("owner_first_name", event.target.value)}
-                required
-              />
-            </Field>
-            <Field label="Last name">
-              <input
-                value={form.owner_last_name}
-                onChange={(event) => updateField("owner_last_name", event.target.value)}
-                required
-              />
-            </Field>
-            <button className="primary-action" type="submit" disabled={isSubmitting}>
-              <Plus size={18} />
-              {isSubmitting ? "Creating tenant" : "Create tenant"}
-            </button>
-          </form>
-        </Panel>
-
+  function renderSubscriptionsModule() {
+    return (
+      <>
+        <div className="stats-grid">
+          <Stat label="Trial" value={subscriptionCounts.trial} />
+          <Stat label="Active" value={subscriptionCounts.active} tone="good" />
+          <Stat label="Overdue" value={subscriptionCounts.overdue} tone="warn" />
+          <Stat label="Cancelled" value={subscriptionCounts.cancelled} tone="warn" />
+        </div>
         <Panel
-          title="Restaurants"
+          title="Subscriptions"
           action={
-            <button
-              className="icon-button"
-              type="button"
-              onClick={loadRestaurants}
-              title="Refresh restaurants"
-            >
+            <button className="icon-button" type="button" onClick={loadRestaurants}>
               <RefreshCw size={17} />
             </button>
           }
@@ -451,55 +675,18 @@ export function PlatformAdminView({ token }: Props) {
                 subscription_renews_at: toDateInputValue(restaurant.subscription_renews_at),
               };
               return (
-                <article className="tenant-card" key={restaurant.id}>
+                <article className="tenant-card tenant-card-subscription" key={restaurant.id}>
                   <div className="tenant-card-heading">
-                    <span
-                      className={
-                        restaurant.status === "SUSPENDED" ? "status-pill inactive" : "status-pill"
-                      }
-                    >
-                      {restaurant.status.replace("_", " ")}
-                    </span>
-                    <span
-                      className={
-                        restaurant.subscription_status === "OVERDUE" ||
-                        restaurant.subscription_status === "CANCELLED"
-                          ? "status-pill inactive"
-                          : "status-pill"
-                      }
-                    >
+                    <span className={statusPillClass(restaurant.subscription_status)}>
                       {restaurant.subscription_status}
+                    </span>
+                    <span className={statusPillClass(restaurant.status)}>
+                      {restaurant.status.replace("_", " ")}
                     </span>
                   </div>
                   <div className="tenant-card-body">
                     <h3>{restaurant.name}</h3>
                     <span>{restaurant.code}</span>
-                    {restaurant.suspension_reason ? (
-                      <p className="tenant-warning">{restaurant.suspension_reason}</p>
-                    ) : null}
-                    {restaurant.owner_setup_expires_at ? (
-                      <p
-                        className={
-                          restaurant.owner_setup_expired
-                            ? "tenant-warning"
-                            : "tenant-helper-text"
-                        }
-                      >
-                        Owner setup expires {formatDateTime(restaurant.owner_setup_expires_at)}
-                      </p>
-                    ) : null}
-                    <div className="tenant-health-grid">
-                      <span>{restaurant.branch_count} branches</span>
-                      <span>{restaurant.active_user_count} users</span>
-                      <span>{restaurant.today_order_count} orders today</span>
-                      <span>{formatMoney(restaurant.today_revenue)} today</span>
-                      <span>{restaurant.pending_payment_count} pending payments</span>
-                      <span>{restaurant.failed_payment_count} failed payments</span>
-                      <span>
-                        {restaurant.critical_stock_alert_count} critical stock alerts
-                      </span>
-                      <span>{restaurant.low_stock_alert_count} low stock alerts</span>
-                    </div>
                     <div className="tenant-subscription-grid">
                       <label>
                         <span>Subscription</span>
@@ -552,99 +739,180 @@ export function PlatformAdminView({ token }: Props) {
                         Save
                       </button>
                     </div>
-                    <div className="tenant-card-meta">
-                      <span>{restaurant.owner_name ?? "No owner"}</span>
-                      <span>{restaurant.owner_email ?? "No owner email"}</span>
-                      <span>Last order {formatDateTime(restaurant.last_order_at)}</span>
-                    </div>
-                  </div>
-                  <div className="tenant-card-actions">
-                    <button
-                      className="secondary-action"
-                      type="button"
-                      onClick={() => void createOwnerSetupLink(restaurant)}
-                      disabled={actionRestaurantId === restaurant.id}
-                    >
-                      <KeyRound size={17} />
-                      Owner link
-                    </button>
-                    {restaurant.status === "SUSPENDED" ? (
-                      <button
-                        className="secondary-action"
-                        type="button"
-                        onClick={() => void updateLifecycle(restaurant, "ACTIVE")}
-                        disabled={actionRestaurantId === restaurant.id}
-                      >
-                        <Power size={17} />
-                        Reactivate
-                      </button>
-                    ) : (
-                      <button
-                        className="secondary-action danger-action"
-                        type="button"
-                        onClick={() => {
-                          setSuspendingRestaurantId(restaurant.id);
-                          setSuspensionReason("");
-                        }}
-                        disabled={actionRestaurantId === restaurant.id}
-                      >
-                        <PowerOff size={17} />
-                        Suspend
-                      </button>
-                    )}
-                    {suspendingRestaurantId === restaurant.id ? (
-                      <div className="tenant-suspend-box">
-                        <label>
-                          <span>
-                            <AlertTriangle size={15} />
-                            Suspension reason
-                          </span>
-                          <textarea
-                            value={suspensionReason}
-                            onChange={(event) => setSuspensionReason(event.target.value)}
-                            rows={3}
-                            maxLength={300}
-                            required
-                          />
-                        </label>
-                        <div className="tenant-card-actions">
-                          <button
-                            className="secondary-action danger-action"
-                            type="button"
-                            onClick={() =>
-                              void updateLifecycle(
-                                restaurant,
-                                "SUSPENDED",
-                                suspensionReason.trim() || "Suspended by platform admin",
-                              )
-                            }
-                            disabled={actionRestaurantId === restaurant.id}
-                          >
-                            <PowerOff size={17} />
-                            Confirm
-                          </button>
-                          <button
-                            className="secondary-action"
-                            type="button"
-                            onClick={() => {
-                              setSuspendingRestaurantId(null);
-                              setSuspensionReason("");
-                            }}
-                          >
-                            <CalendarDays size={17} />
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 </article>
               );
             })}
-            {!restaurants.length ? <EmptyState>No restaurants onboarded yet</EmptyState> : null}
+            {!restaurants.length ? <EmptyState>No subscriptions available</EmptyState> : null}
           </div>
         </Panel>
-      </div>
+      </>
+    );
+  }
+
+  function renderHealthModule() {
+    return (
+      <>
+        <div className="stats-grid">
+          <Stat label="Orders today" value={healthTotals.orders} />
+          <Stat label="Revenue today" value={formatMoney(healthTotals.revenue)} tone="good" />
+          <Stat label="Payment attention" value={healthTotals.paymentAttention} tone="warn" />
+          <Stat label="Stock alerts" value={healthTotals.stockAlerts} tone="warn" />
+        </div>
+        <Panel
+          title="Tenant Health"
+          action={
+            <button className="icon-button" type="button" onClick={loadRestaurants}>
+              <RefreshCw size={17} />
+            </button>
+          }
+        >
+          <div className="tenant-list">
+            {restaurants.map((restaurant) => (
+              <article className="tenant-card tenant-card-health" key={restaurant.id}>
+                <div className="tenant-card-heading">
+                  <span className={statusPillClass(restaurant.status)}>
+                    {restaurant.status.replace("_", " ")}
+                  </span>
+                  <span className={statusPillClass(restaurant.subscription_status)}>
+                    {restaurant.subscription_status}
+                  </span>
+                </div>
+                <div className="tenant-card-body">
+                  <h3>{restaurant.name}</h3>
+                  <span>{restaurant.code}</span>
+                  <div className="tenant-health-grid">
+                    <span>{restaurant.today_order_count} orders today</span>
+                    <span>{formatMoney(restaurant.today_revenue)} today</span>
+                    <span>{restaurant.pending_payment_count} pending payments</span>
+                    <span>{restaurant.failed_payment_count} failed payments</span>
+                    <span>{restaurant.critical_stock_alert_count} critical stock alerts</span>
+                    <span>{restaurant.low_stock_alert_count} low stock alerts</span>
+                    <span>{restaurant.branch_count} branches</span>
+                    <span>{restaurant.active_user_count} users</span>
+                  </div>
+                  <div className="tenant-card-meta">
+                    <span>Last order {formatDateTime(restaurant.last_order_at)}</span>
+                    <span>{restaurant.owner_name ?? "No owner"}</span>
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!restaurants.length ? <EmptyState>No tenant health data yet</EmptyState> : null}
+          </div>
+        </Panel>
+      </>
+    );
+  }
+
+  function renderAuditModule() {
+    return (
+      <>
+        <div className="stats-grid">
+          <Stat label="Audit events" value={logs.length} />
+          <Stat label="Tenants" value={restaurants.length} />
+          <Stat
+            label="Lifecycle events"
+            value={logs.filter((log) => log.action.includes("LIFECYCLE")).length}
+          />
+          <Stat
+            label="Subscription events"
+            value={logs.filter((log) => log.action.includes("SUBSCRIPTION")).length}
+          />
+        </div>
+        <Panel
+          title="Platform Audit"
+          action={
+            <button className="secondary-action" type="button" onClick={loadLogs}>
+              <RefreshCw size={17} />
+              Refresh
+            </button>
+          }
+        >
+          <div className="audit-filter-grid">
+            <Field label="From">
+              <input
+                type="date"
+                value={auditDateFrom}
+                onChange={(event) => setAuditDateFrom(event.target.value)}
+              />
+            </Field>
+            <Field label="To">
+              <input
+                type="date"
+                value={auditDateTo}
+                onChange={(event) => setAuditDateTo(event.target.value)}
+              />
+            </Field>
+            <Field label="Action">
+              <select value={auditAction} onChange={(event) => setAuditAction(event.target.value)}>
+                <option value="">All actions</option>
+                {PLATFORM_AUDIT_ACTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {formatAction(option)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Entity">
+              <select
+                value={auditEntityType}
+                onChange={(event) => setAuditEntityType(event.target.value)}
+              >
+                <option value="">All entities</option>
+                {PLATFORM_AUDIT_ENTITIES.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </Panel>
+        <div className="audit-list">
+          {logs.map((log) => (
+            <article className="audit-row" data-testid={`platform-audit-${log.action}`} key={log.id}>
+              <header className="audit-row-header">
+                <ClipboardList size={18} />
+                <div>
+                  <strong>{formatAction(log.action)}</strong>
+                  <span>
+                    {tenantNameById.get(log.restaurant_id) ?? log.restaurant_id} |{" "}
+                    {log.user_name ?? log.user_email ?? "System"} | {formatDateTime(log.created_at)}
+                  </span>
+                </div>
+                <span className="status-pill">{log.entity_type}</span>
+              </header>
+              <div className="audit-change-grid">
+                <div>
+                  <span>Before</span>
+                  <p>{summarizeValues(log.old_values)}</p>
+                </div>
+                <div>
+                  <span>After</span>
+                  <p>{summarizeValues(log.new_values)}</p>
+                </div>
+              </div>
+            </article>
+          ))}
+          {!logs.length ? (
+            <EmptyState>No platform audit events for the selected filters</EmptyState>
+          ) : null}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="view-stack">
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {notice ? <Notice tone="success">{notice}</Notice> : null}
+      {isLoading ? <Notice>Loading platform data</Notice> : null}
+
+      {module === "tenants" ? renderTenantsModule() : null}
+      {module === "subscriptions" ? renderSubscriptionsModule() : null}
+      {module === "health" ? renderHealthModule() : null}
+      {module === "audit" ? renderAuditModule() : null}
     </div>
   );
 }
