@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.audit.models import AuditLog
 from app.core.config import settings
 from app.core.webhooks import build_hmac_signature
+from app.incidents.models import PlatformIncident
 from app.orders.enums import OrderStatus, PaymentStatus
 from app.orders.models import Order, OrderStatusHistory
 from app.payments.models import Payment, PaymentEvent
@@ -355,6 +356,7 @@ def test_mobile_transfer_confirmation_rejects_wrong_payment_reference(
 
 def test_payment_webhook_rejects_invalid_signature(
     api_client: TestClient,
+    db_session: Session,
     seeded_restaurant: dict[str, object],
 ):
     payload = {
@@ -377,6 +379,16 @@ def test_payment_webhook_rejects_invalid_signature(
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid webhook signature"
+    incident = (
+        db_session.query(PlatformIncident)
+        .filter(
+            PlatformIncident.category == "PAYMENT_WEBHOOK",
+            PlatformIncident.message == "Invalid webhook signature",
+        )
+        .one()
+    )
+    assert incident.source == "PAYMENTS"
+    assert incident.severity == "CRITICAL"
 
 
 def test_payment_webhook_rejects_amount_mismatch(

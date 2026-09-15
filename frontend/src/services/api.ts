@@ -91,6 +91,48 @@ export type PlatformRestaurantSummary = Restaurant & {
   subscription_grace_ends_at: string | null;
 };
 
+export type PlatformIncident = {
+  id: string;
+  restaurant_id: string | null;
+  source: string;
+  category: string;
+  severity: string;
+  status: string;
+  title: string;
+  message: string;
+  fingerprint: string | null;
+  context: Record<string, unknown> | null;
+  created_at: string | null;
+  resolved_at: string | null;
+};
+
+export type PlatformHealthSummary = {
+  status: string;
+  database: string;
+  version: string;
+  environment: string;
+};
+
+export type TenantRiskSummary = {
+  restaurant_id: string;
+  restaurant_name: string;
+  severity: string;
+  signals: string[];
+};
+
+export type PlatformIncidentSummary = {
+  system: PlatformHealthSummary;
+  open_incidents: number;
+  critical_incidents: number;
+  incidents_last_24h: number;
+  frontend_errors_last_24h: number;
+  webhook_failures_last_24h: number;
+  failed_payments_today: number;
+  pending_payments_today: number;
+  tenant_risks: TenantRiskSummary[];
+  recent_incidents: PlatformIncident[];
+};
+
 export type Branch = {
   id: string;
   restaurant_id: string;

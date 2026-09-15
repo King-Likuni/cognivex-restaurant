@@ -21,6 +21,8 @@ import {
   apiRequest,
   type AuditLog,
   type PasswordSetupToken,
+  type PlatformIncident,
+  type PlatformIncidentSummary,
   type PlatformRestaurantSummary,
   type PlatformUserInviteResponse,
   type RestaurantLifecycleStatus,
@@ -30,7 +32,13 @@ import {
   type User,
 } from "../services/api";
 
-export type PlatformAdminModule = "tenants" | "subscriptions" | "health" | "users" | "audit";
+export type PlatformAdminModule =
+  | "tenants"
+  | "subscriptions"
+  | "health"
+  | "incidents"
+  | "users"
+  | "audit";
 
 type Props = {
   token: string;
@@ -148,7 +156,10 @@ function statusPillClass(status: string | null | undefined) {
   return status === "SUSPENDED" ||
     status === "OVERDUE" ||
     status === "CANCELLED" ||
-    status === "BLOCKED"
+    status === "BLOCKED" ||
+    status === "WARNING" ||
+    status === "ERROR" ||
+    status === "CRITICAL"
     ? "status-pill inactive"
     : "status-pill";
 }
@@ -168,6 +179,8 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
   const [restaurants, setRestaurants] = useState<PlatformRestaurantSummary[]>([]);
   const [platformUsers, setPlatformUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [incidentSummary, setIncidentSummary] = useState<PlatformIncidentSummary | null>(null);
+  const [incidents, setIncidents] = useState<PlatformIncident[]>([]);
   const [form, setForm] = useState<OnboardingForm>(EMPTY_FORM);
   const [platformUserForm, setPlatformUserForm] =
     useState<PlatformUserForm>(EMPTY_PLATFORM_USER_FORM);
@@ -308,6 +321,26 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
     }
   }, [token]);
 
+  const loadIncidents = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [summary, nextIncidents] = await Promise.all([
+        apiRequest<PlatformIncidentSummary>("/api/v1/platform/incidents/summary", { token }),
+        apiRequest<PlatformIncident[]>("/api/v1/platform/incidents/", {
+          token,
+          params: { status: "OPEN", limit: 100 },
+        }),
+      ]);
+      setIncidentSummary(summary);
+      setIncidents(nextIncidents);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load incidents");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     void loadRestaurants();
   }, [loadRestaurants]);
@@ -319,7 +352,10 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
     if (module === "users") {
       void loadPlatformUsers();
     }
-  }, [loadLogs, loadPlatformUsers, module]);
+    if (module === "incidents") {
+      void loadIncidents();
+    }
+  }, [loadIncidents, loadLogs, loadPlatformUsers, module]);
 
   function updateField<K extends keyof OnboardingForm>(field: K, value: OnboardingForm[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -556,6 +592,24 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
       setNotice(`${user.email} setup link created`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not create setup link");
+    } finally {
+      setActionRestaurantId(null);
+    }
+  }
+
+  async function resolveIncident(incident: PlatformIncident) {
+    setNotice(null);
+    setError(null);
+    setActionRestaurantId(incident.id);
+    try {
+      await apiRequest(`/api/v1/platform/incidents/${incident.id}/resolve`, {
+        method: "PATCH",
+        token,
+      });
+      setNotice("Incident resolved");
+      await loadIncidents();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not resolve incident");
     } finally {
       setActionRestaurantId(null);
     }
@@ -1152,6 +1206,123 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
     );
   }
 
+  function renderIncidentsModule() {
+    const summary = incidentSummary;
+    return (
+      <>
+        <div className="stats-grid">
+          <Stat label="Open incidents" value={summary?.open_incidents ?? 0} tone="warn" />
+          <Stat label="Critical" value={summary?.critical_incidents ?? 0} tone="warn" />
+          <Stat label="Frontend errors" value={summary?.frontend_errors_last_24h ?? 0} />
+          <Stat label="Webhook failures" value={summary?.webhook_failures_last_24h ?? 0} />
+        </div>
+        <div className="view-grid two-columns">
+          <Panel
+            title="System Health"
+            action={
+              <button className="icon-button" type="button" onClick={loadIncidents}>
+                <RefreshCw size={17} />
+              </button>
+            }
+          >
+            <div className="tenant-list">
+              <article className="tenant-card tenant-card-health">
+                <div className="tenant-card-heading">
+                  <span className={statusPillClass(summary?.system.status ?? "UNKNOWN")}>
+                    {summary?.system.status ?? "UNKNOWN"}
+                  </span>
+                  <span className={statusPillClass(summary?.system.database ?? "UNKNOWN")}>
+                    Database {summary?.system.database ?? "unknown"}
+                  </span>
+                </div>
+                <div className="tenant-health-grid">
+                  <span>Version {summary?.system.version ?? "unknown"}</span>
+                  <span>Environment {summary?.system.environment ?? "unknown"}</span>
+                  <span>{summary?.pending_payments_today ?? 0} pending payments today</span>
+                  <span>{summary?.failed_payments_today ?? 0} failed payments today</span>
+                  <span>{summary?.incidents_last_24h ?? 0} incidents in 24h</span>
+                </div>
+              </article>
+            </div>
+          </Panel>
+
+          <Panel title="Tenant Risks">
+            <div className="tenant-list">
+              {summary?.tenant_risks.map((risk) => (
+                <article className="tenant-card tenant-card-compact" key={risk.restaurant_id}>
+                  <div className="tenant-card-heading">
+                    <span className={statusPillClass(risk.severity)}>{risk.severity}</span>
+                  </div>
+                  <div className="tenant-card-body">
+                    <h3>{risk.restaurant_name}</h3>
+                    <div className="tenant-card-meta">
+                      {risk.signals.map((signal) => (
+                        <span key={signal}>{signal}</span>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {!summary?.tenant_risks.length ? <EmptyState>No active tenant risks</EmptyState> : null}
+            </div>
+          </Panel>
+        </div>
+
+        <Panel
+          title="Open Incidents"
+          action={
+            <button className="secondary-action" type="button" onClick={loadIncidents}>
+              <RefreshCw size={17} />
+              Refresh
+            </button>
+          }
+        >
+          <div className="audit-list">
+            {incidents.map((incident) => (
+              <article className="audit-row" key={incident.id}>
+                <header className="audit-row-header">
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{incident.title}</strong>
+                    <span>
+                      {incident.source} | {incident.category} |{" "}
+                      {formatDateTime(incident.created_at)}
+                    </span>
+                  </div>
+                  <span className={statusPillClass(incident.severity)}>{incident.severity}</span>
+                </header>
+                <div className="audit-change-grid">
+                  <div>
+                    <span>Message</span>
+                    <p>{incident.message}</p>
+                  </div>
+                  <div>
+                    <span>Context</span>
+                    <p>{summarizeValues(incident.context)}</p>
+                  </div>
+                </div>
+                {canManagePlatform ? (
+                  <div className="tenant-card-actions">
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => void resolveIncident(incident)}
+                      disabled={actionRestaurantId === incident.id}
+                    >
+                      <ClipboardList size={17} />
+                      Resolve
+                    </button>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+            {!incidents.length ? <EmptyState>No open incidents</EmptyState> : null}
+          </div>
+        </Panel>
+      </>
+    );
+  }
+
   function renderAuditModule() {
     return (
       <>
@@ -1259,6 +1430,7 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
       {module === "tenants" ? renderTenantsModule() : null}
       {module === "subscriptions" ? renderSubscriptionsModule() : null}
       {module === "health" ? renderHealthModule() : null}
+      {module === "incidents" ? renderIncidentsModule() : null}
       {module === "users" ? renderPlatformUsersModule() : null}
       {module === "audit" ? renderAuditModule() : null}
     </div>

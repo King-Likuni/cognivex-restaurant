@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import ensure_restaurant_access, require_cashier
 from app.core.webhooks import verify_hmac_signature
+from app.incidents import service as incident_service
 from app.payments import service
 from app.payments.schemas import (
     CashPaymentConfirmRequest,
@@ -112,16 +113,33 @@ async def process_payment_webhook(
 ):
     raw_body = await request.body()
     if not verify_hmac_signature(raw_body, x_cognivex_signature, settings.PAYMENT_WEBHOOK_SECRET):
+        incident_service.record_payment_webhook_failure(
+            db,
+            provider=provider,
+            reason="Invalid webhook signature",
+            severity=incident_service.SEVERITY_CRITICAL,
+        )
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError as exc:
+        incident_service.record_payment_webhook_failure(
+            db,
+            provider=provider,
+            reason="Invalid JSON payload",
+        )
         raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
     try:
         payment, event, idempotent = service.process_payment_webhook(db, provider, payload)
     except ValueError as exc:
+        incident_service.record_payment_webhook_failure(
+            db,
+            provider=provider,
+            reason=str(exc),
+            payload=payload,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return PaymentWebhookResponse(

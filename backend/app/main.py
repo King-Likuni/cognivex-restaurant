@@ -10,6 +10,7 @@ from app.auth.router import router as auth_router
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.observability import configure_logging, request_logging_middleware
+from app.incidents.router import router as incidents_router
 from app.inventory.router import router as inventory_router
 from app.kitchen.router import router as kitchen_router
 from app.menu.router import router as menu_router
@@ -70,5 +71,6 @@ app.include_router(kitchen_router, prefix=settings.API_V1_STR)
 app.include_router(reports_router, prefix=settings.API_V1_STR)
 app.include_router(audit_router, prefix=settings.API_V1_STR)
 app.include_router(platform_audit_router, prefix=settings.API_V1_STR)
+app.include_router(incidents_router, prefix=settings.API_V1_STR)
 app.include_router(public_router, prefix=settings.API_V1_STR)
 app.include_router(realtime_router)

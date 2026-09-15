@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BarChart3,
   Boxes,
   Building2,
@@ -48,6 +49,7 @@ type ViewKey =
   | "platform-tenants"
   | "platform-subscriptions"
   | "platform-health"
+  | "platform-incidents"
   | "platform-users"
   | "platform-audit"
   | "cashier"
@@ -66,6 +68,7 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
   { key: "platform-tenants", label: "Tenants", icon: Store },
   { key: "platform-subscriptions", label: "Subscriptions", icon: CreditCard },
   { key: "platform-health", label: "Tenant Health", icon: BarChart3 },
+  { key: "platform-incidents", label: "Incidents", icon: AlertTriangle },
   { key: "platform-users", label: "Platform Users", icon: Users },
   { key: "platform-audit", label: "Platform Audit", icon: ClipboardList },
   { key: "cashier", label: "Cashier", icon: ShoppingCart },
@@ -82,11 +85,12 @@ const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
     "platform-tenants",
     "platform-subscriptions",
     "platform-health",
+    "platform-incidents",
     "platform-users",
     "platform-audit",
   ],
-  SUPPORT: ["platform-tenants", "platform-health", "platform-audit"],
-  FINANCE: ["platform-subscriptions", "platform-health", "platform-audit"],
+  SUPPORT: ["platform-tenants", "platform-health", "platform-incidents", "platform-audit"],
+  FINANCE: ["platform-subscriptions", "platform-health", "platform-incidents", "platform-audit"],
   OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier", "kitchen", "inventory", "dashboard"],
@@ -98,6 +102,7 @@ const PLATFORM_MODULE_BY_VIEW: Partial<Record<ViewKey, PlatformAdminModule>> = {
   "platform-tenants": "tenants",
   "platform-subscriptions": "subscriptions",
   "platform-health": "health",
+  "platform-incidents": "incidents",
   "platform-users": "users",
   "platform-audit": "audit",
 };
@@ -261,6 +266,9 @@ function OperationsApp() {
       }
       if (view === "platform-health") {
         return "Platform / Tenant Health";
+      }
+      if (view === "platform-incidents") {
+        return "Platform / Incidents";
       }
       if (view === "platform-users") {
         return "Platform / Users";
