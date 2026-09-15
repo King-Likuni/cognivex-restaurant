@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 class AuditLogResponse(BaseModel):
     id: UUID
-    restaurant_id: UUID
+    restaurant_id: UUID | None
     user_id: UUID | None
     user_email: str | None
     user_name: str | None

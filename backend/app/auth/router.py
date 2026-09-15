@@ -14,6 +14,9 @@ from app.auth.schemas import (
     PasswordSetupConfirm,
     PasswordSetupPreviewResponse,
     PasswordSetupTokenResponse,
+    PlatformUserInviteCreate,
+    PlatformUserInviteResponse,
+    PlatformUserUpdate,
     StaffInviteCreate,
     StaffInviteResponse,
     UserCreate,
@@ -25,6 +28,7 @@ from app.core.dependencies import (
     RoleChecker,
     ensure_restaurant_access,
     get_current_active_user,
+    require_admin,
 )
 from app.core.security import create_access_token
 
@@ -78,6 +82,12 @@ def ensure_user_management_scope(
     if restaurant_id is not None:
         ensure_restaurant_access(current_user, restaurant_id)
     return current_user.restaurant_id
+
+
+def ensure_platform_user(user: User) -> None:
+    role_name = user.role.name if user.role else None
+    if user.restaurant_id is not None or role_name not in service.PLATFORM_ROLES:
+        raise HTTPException(status_code=404, detail="Platform user not found")
 
 
 def ensure_owner_safety(db: Session, user: User, user_in: UserUpdate) -> None:
@@ -158,10 +168,10 @@ def create_user(
     current_role = current_user.role.name if current_user.role else None
     requested_role = user_in.role_name.upper()
     if current_role != "ADMIN":
-        if requested_role == "ADMIN":
+        if requested_role in service.PLATFORM_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Restaurant users cannot create platform admins",
+                detail="Restaurant users cannot create platform users",
             )
         if user_in.restaurant_id is not None:
             ensure_restaurant_access(current_user, user_in.restaurant_id)
@@ -190,10 +200,10 @@ def create_user_invite(
     current_role = current_user.role.name if current_user.role else None
     requested_role = user_in.role_name.upper()
     if current_role != "ADMIN":
-        if requested_role == "ADMIN":
+        if requested_role in service.PLATFORM_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Restaurant users cannot create platform admins",
+                detail="Restaurant users cannot create platform users",
             )
         if user_in.restaurant_id is not None:
             ensure_restaurant_access(current_user, user_in.restaurant_id)
@@ -231,6 +241,104 @@ def list_users(
     return [serialize_user(user) for user in users]
 
 
+@router.get("/platform-users", response_model=list[UserResponse])
+def list_platform_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """List platform-only users. Platform admins only."""
+    return [serialize_user(user) for user in service.list_platform_users(db)]
+
+
+@router.post(
+    "/platform-users/invite",
+    response_model=PlatformUserInviteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_platform_user_invite(
+    user_in: PlatformUserInviteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Invite a platform admin, support, or finance user."""
+    try:
+        user, reset_token, raw_token = service.create_platform_user_invite(
+            db,
+            user_in,
+            created_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    return PlatformUserInviteResponse(
+        user=serialize_user(user),
+        invite=serialize_password_setup_token(reset_token, raw_token),
+    )
+
+
+@router.patch("/platform-users/{user_id}", response_model=UserResponse)
+def update_platform_user(
+    user_id: UUID,
+    user_in: PlatformUserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Update a platform-only user with last-admin safety checks."""
+    user = service.get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Platform user not found")
+    ensure_platform_user(user)
+    if user.id == current_user.id and user_in.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot deactivate your own account",
+        )
+
+    try:
+        updated_user = service.update_platform_user(
+            db,
+            user,
+            user_in,
+            changed_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    return serialize_user(updated_user)
+
+
+@router.post("/platform-users/{user_id}/password-reset", response_model=PasswordSetupTokenResponse)
+def create_platform_user_password_reset(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Create a one-time setup link for an active platform user."""
+    user = service.get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Platform user not found")
+    ensure_platform_user(user)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive users must be reactivated before password reset",
+        )
+
+    reset_token, raw_token = service.create_password_setup_token(
+        db,
+        user,
+        created_by=current_user.id,
+    )
+    service.add_platform_user_audit(
+        db,
+        actor_id=current_user.id,
+        action="PLATFORM_PASSWORD_SETUP_LINK_CREATED",
+        user=user,
+    )
+    db.commit()
+    return serialize_password_setup_token(reset_token, raw_token)
+
+
 @router.patch("/users/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: UUID,
@@ -246,10 +354,10 @@ def update_user(
     current_role = current_user.role.name if current_user.role else None
     if current_role != "ADMIN":
         ensure_restaurant_access(current_user, user.restaurant_id)
-        if user_in.role_name is not None and user_in.role_name.upper() == "ADMIN":
+        if user_in.role_name is not None and user_in.role_name.upper() in service.PLATFORM_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Restaurant users cannot create platform admins",
+                detail="Restaurant users cannot create platform users",
             )
     if user.id == current_user.id and user_in.is_active is False:
         raise HTTPException(

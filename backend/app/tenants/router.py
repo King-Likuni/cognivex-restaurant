@@ -12,6 +12,7 @@ from app.core.dependencies import (
     ensure_restaurant_access,
     get_current_active_user,
     require_admin,
+    require_platform_reader,
     require_restaurant_access,
     require_restaurant_owner,
 )
@@ -106,7 +107,7 @@ def onboard_restaurant(
 @router.get(
     "/platform",
     response_model=list[PlatformRestaurantSummary],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_platform_reader)],
 )
 def list_platform_restaurants(db: Session = Depends(get_db)):
     """List restaurants with platform-level lifecycle and ownership summary."""

@@ -14,7 +14,7 @@ class AuditLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     restaurant_id = Column(
-        UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=True, index=True
     )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 

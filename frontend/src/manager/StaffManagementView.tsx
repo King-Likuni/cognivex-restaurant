@@ -40,7 +40,7 @@ type NewStaffForm = StaffDraft & {
   email: string;
 };
 
-type StaffRole = Exclude<RoleName, "ADMIN">;
+type StaffRole = Exclude<RoleName, "ADMIN" | "SUPPORT" | "FINANCE">;
 
 const STAFF_ROLES: StaffRole[] = ["OWNER", "MANAGER", "CASHIER", "KITCHEN", "INVENTORY"];
 
@@ -53,10 +53,18 @@ const DEFAULT_NEW_STAFF: NewStaffForm = {
 };
 
 function draftFromUser(user: User): StaffDraft {
+  const restaurantRole =
+    user.role_name === "OWNER" ||
+    user.role_name === "MANAGER" ||
+    user.role_name === "CASHIER" ||
+    user.role_name === "KITCHEN" ||
+    user.role_name === "INVENTORY"
+      ? user.role_name
+      : "CASHIER";
   return {
     first_name: user.first_name ?? "",
     last_name: user.last_name ?? "",
-    role_name: (user.role_name === "ADMIN" || !user.role_name ? "CASHIER" : user.role_name),
+    role_name: restaurantRole,
     branch_ids: user.branch_ids ?? [],
   };
 }

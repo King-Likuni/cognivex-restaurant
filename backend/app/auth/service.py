@@ -9,13 +9,21 @@ from sqlalchemy.orm import Session
 
 from app.audit.models import AuditLog
 from app.auth.models import PasswordResetToken, Role, User
-from app.auth.schemas import StaffInviteCreate, UserCreate, UserUpdate
+from app.auth.schemas import (
+    PlatformUserInviteCreate,
+    PlatformUserUpdate,
+    StaffInviteCreate,
+    UserCreate,
+    UserUpdate,
+)
 from app.core.security import get_password_hash, verify_password
 from app.tenants.models import Branch, Restaurant
 
 PASSWORD_SETUP_TOKEN_HOURS = 48
 TOKEN_PURPOSE_INVITE = "INVITE"
 TOKEN_PURPOSE_RESET = "RESET"
+PLATFORM_ROLES = {"ADMIN", "SUPPORT", "FINANCE"}
+RESTAURANT_ROLES = {"OWNER", "MANAGER", "CASHIER", "KITCHEN", "INVENTORY"}
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
@@ -27,7 +35,7 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
         return None
     role_name = user.role.name if user.role else None
     if (
-        role_name != "ADMIN"
+        role_name not in PLATFORM_ROLES
         and user.restaurant_id is not None
         and (user.restaurant is None or not user.restaurant.is_active)
     ):
@@ -83,11 +91,14 @@ def create_user(
     role = validate_role(db, user_in.role_name)
     role_name = role.name
 
-    if role_name == "ADMIN" and user_in.restaurant_id is not None:
-        raise ValueError("Platform admins must not be assigned to a restaurant")
+    if role_name in PLATFORM_ROLES and user_in.restaurant_id is not None:
+        raise ValueError("Platform users must not be assigned to a restaurant")
 
-    if role_name != "ADMIN" and user_in.restaurant_id is None:
+    if role_name in RESTAURANT_ROLES and user_in.restaurant_id is None:
         raise ValueError("Restaurant users must be assigned to a restaurant")
+
+    if role_name not in PLATFORM_ROLES | RESTAURANT_ROLES:
+        raise ValueError(f"Role '{user_in.role_name}' is not supported")
 
     if user_in.restaurant_id is not None:
         validate_restaurant(db, user_in.restaurant_id)
@@ -120,6 +131,84 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+def platform_user_audit_values(user: User) -> dict:
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "role_name": user.role.name if user.role else None,
+        "is_active": user.is_active,
+    }
+
+
+def add_platform_user_audit(
+    db: Session,
+    *,
+    actor_id: UUID | None,
+    action: str,
+    user: User,
+    old_values: dict | None = None,
+) -> None:
+    db.add(
+        AuditLog(
+            restaurant_id=None,
+            user_id=actor_id,
+            action=action,
+            entity_type="platform_user",
+            entity_id=user.id,
+            old_values=old_values,
+            new_values=platform_user_audit_values(user),
+        )
+    )
+
+
+def create_platform_user_invite(
+    db: Session,
+    user_in: PlatformUserInviteCreate,
+    *,
+    created_by: UUID,
+) -> tuple[User, PasswordResetToken, str]:
+    role_name = user_in.role_name.upper()
+    if role_name not in PLATFORM_ROLES:
+        raise ValueError("Platform user role must be ADMIN, SUPPORT, or FINANCE")
+
+    temporary_password = secrets.token_urlsafe(24)
+    user = create_user(
+        db,
+        UserCreate(
+            email=user_in.email,
+            password=temporary_password,
+            first_name=user_in.first_name,
+            last_name=user_in.last_name,
+            role_name=role_name,
+            restaurant_id=None,
+            branch_ids=[],
+        ),
+    )
+    add_platform_user_audit(
+        db,
+        actor_id=created_by,
+        action="PLATFORM_USER_INVITED",
+        user=user,
+    )
+    db.commit()
+    reset_token, raw_token = create_password_setup_token(
+        db,
+        user,
+        created_by=created_by,
+        purpose=TOKEN_PURPOSE_INVITE,
+    )
+    add_platform_user_audit(
+        db,
+        actor_id=created_by,
+        action="PLATFORM_PASSWORD_SETUP_LINK_CREATED",
+        user=user,
+    )
+    db.commit()
+    return user, reset_token, raw_token
 
 
 def create_user_invite(
@@ -247,6 +336,50 @@ def list_users(db: Session, restaurant_id: UUID | None = None) -> list[User]:
     return query.order_by(Role.name.asc(), User.email.asc()).all()
 
 
+def list_platform_users(db: Session) -> list[User]:
+    return (
+        db.query(User)
+        .join(Role, User.role_id == Role.id)
+        .filter(User.restaurant_id.is_(None), Role.name.in_(PLATFORM_ROLES))
+        .order_by(Role.name.asc(), User.email.asc())
+        .all()
+    )
+
+
+def count_active_platform_admins(
+    db: Session,
+    exclude_user_id: UUID | None = None,
+) -> int:
+    query = (
+        db.query(User)
+        .join(Role, User.role_id == Role.id)
+        .filter(
+            User.restaurant_id.is_(None),
+            User.is_active.is_(True),
+            Role.name == "ADMIN",
+        )
+    )
+    if exclude_user_id:
+        query = query.filter(User.id != exclude_user_id)
+    return query.count()
+
+
+def ensure_platform_admin_safety(db: Session, user: User, user_in: PlatformUserUpdate) -> None:
+    if user.restaurant_id is not None or not user.role or user.role.name != "ADMIN":
+        return
+    changes = user_in.model_dump(exclude_unset=True)
+    deactivates_user = changes.get("is_active") is False
+    demotes_admin = (
+        "role_name" in changes
+        and user_in.role_name is not None
+        and user_in.role_name.upper() != "ADMIN"
+    )
+    if not deactivates_user and not demotes_admin:
+        return
+    if count_active_platform_admins(db, exclude_user_id=user.id) == 0:
+        raise ValueError("At least one active platform admin is required")
+
+
 def count_active_restaurant_owners(
     db: Session,
     restaurant_id: UUID,
@@ -278,8 +411,10 @@ def update_user(
 
     if "role_name" in changes and user_in.role_name is not None:
         role = validate_role(db, user_in.role_name)
-        if role.name == "ADMIN" and user.restaurant_id is not None:
-            raise ValueError("Restaurant users cannot be changed into platform admins")
+        if role.name in PLATFORM_ROLES and user.restaurant_id is not None:
+            raise ValueError("Restaurant users cannot be changed into platform users")
+        if role.name in RESTAURANT_ROLES and user.restaurant_id is None:
+            raise ValueError("Platform users cannot be changed into restaurant users")
         user.role = role
 
     if "first_name" in changes and user_in.first_name is not None:
@@ -305,6 +440,49 @@ def update_user(
                 old_values=old_values,
                 new_values=user_audit_values(user),
             )
+        )
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_platform_user(
+    db: Session,
+    user: User,
+    user_in: PlatformUserUpdate,
+    *,
+    changed_by: UUID,
+) -> User:
+    if user.restaurant_id is not None or not user.role or user.role.name not in PLATFORM_ROLES:
+        raise ValueError("User is not a platform user")
+
+    ensure_platform_admin_safety(db, user, user_in)
+    changes = user_in.model_dump(exclude_unset=True)
+    old_values = platform_user_audit_values(user)
+
+    if "role_name" in changes and user_in.role_name is not None:
+        role_name = user_in.role_name.upper()
+        if role_name not in PLATFORM_ROLES:
+            raise ValueError("Platform user role must be ADMIN, SUPPORT, or FINANCE")
+        user.role = validate_role(db, role_name)
+
+    if "first_name" in changes and user_in.first_name is not None:
+        user.first_name = user_in.first_name
+
+    if "last_name" in changes and user_in.last_name is not None:
+        user.last_name = user_in.last_name
+
+    if "is_active" in changes and user_in.is_active is not None:
+        user.is_active = user_in.is_active
+
+    if changes:
+        add_platform_user_audit(
+            db,
+            actor_id=changed_by,
+            action="PLATFORM_USER_UPDATED",
+            user=user,
+            old_values=old_values,
         )
 
     db.commit()
@@ -350,7 +528,16 @@ def set_password_with_token(db: Session, raw_token: str, password: str) -> User 
 
 def seed_roles(db: Session) -> None:
     """Ensure the default roles exist in the database."""
-    default_roles = ["ADMIN", "OWNER", "MANAGER", "CASHIER", "KITCHEN", "INVENTORY"]
+    default_roles = [
+        "ADMIN",
+        "SUPPORT",
+        "FINANCE",
+        "OWNER",
+        "MANAGER",
+        "CASHIER",
+        "KITCHEN",
+        "INVENTORY",
+    ]
     for role_name in default_roles:
         exists = db.query(Role).filter(Role.name == role_name).first()
         if not exists:

@@ -12,6 +12,7 @@ from app.core.security import decode_access_token
 from app.tenants.models import Branch
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+PLATFORM_ROLES = ["ADMIN", "SUPPORT", "FINANCE"]
 
 
 # --------------------------------------------------------------------------- #
@@ -44,7 +45,7 @@ def get_current_user(
         raise credentials_exception
     role_name = user.role.name if user.role else None
     if (
-        role_name != "ADMIN"
+        role_name not in PLATFORM_ROLES
         and user.restaurant_id is not None
         and (user.restaurant is None or not user.restaurant.is_active)
     ):
@@ -98,6 +99,7 @@ require_kitchen = RoleChecker(shared_order_roles)
 require_inventory = RoleChecker(["OWNER", "MANAGER", "INVENTORY"])
 require_inventory_reader = RoleChecker(["OWNER", "MANAGER", "CASHIER", "INVENTORY"])
 require_admin = RoleChecker(["ADMIN"])
+require_platform_reader = RoleChecker(PLATFORM_ROLES)
 
 
 def _role_name(user: User) -> str | None:
@@ -106,7 +108,7 @@ def _role_name(user: User) -> str | None:
 
 def ensure_restaurant_access(user: User, restaurant_id: UUID) -> None:
     """Raise 403 when a user attempts to cross tenant boundaries."""
-    if _role_name(user) == "ADMIN":
+    if _role_name(user) in PLATFORM_ROLES:
         return
     if user.restaurant_id != restaurant_id:
         raise HTTPException(

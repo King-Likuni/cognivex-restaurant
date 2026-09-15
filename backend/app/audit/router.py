@@ -10,7 +10,7 @@ from app.audit import service
 from app.audit.schemas import AuditLogResponse
 from app.auth.models import User
 from app.core.database import get_db
-from app.core.dependencies import RoleChecker, ensure_restaurant_access, require_admin
+from app.core.dependencies import RoleChecker, ensure_restaurant_access, require_platform_reader
 
 router = APIRouter(prefix="/restaurants/{restaurant_id}/audit-logs", tags=["Audit"])
 platform_router = APIRouter(prefix="/platform/audit-logs", tags=["Platform Audit"])
@@ -90,9 +90,9 @@ def list_platform_audit_logs(
     date_to: date | None = None,
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_platform_reader),
 ):
-    """List platform-wide audit history. Platform admins only."""
+    """List platform-wide audit history for platform operators."""
     rows = service.list_platform_audit_logs(
         db,
         action=action,

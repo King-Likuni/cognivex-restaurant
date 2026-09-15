@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Store,
   UserPlus,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -21,16 +22,20 @@ import {
   type AuditLog,
   type PasswordSetupToken,
   type PlatformRestaurantSummary,
+  type PlatformUserInviteResponse,
   type RestaurantLifecycleStatus,
   type RestaurantOnboardingResponse,
   type RestaurantSubscriptionStatus,
+  type RoleName,
+  type User,
 } from "../services/api";
 
-export type PlatformAdminModule = "tenants" | "subscriptions" | "health" | "audit";
+export type PlatformAdminModule = "tenants" | "subscriptions" | "health" | "users" | "audit";
 
 type Props = {
   token: string;
   module: PlatformAdminModule;
+  roleName: RoleName | null;
 };
 
 type OnboardingForm = {
@@ -50,6 +55,15 @@ type SubscriptionDraft = {
   subscription_renews_at: string;
 };
 
+type PlatformUserForm = {
+  email: string;
+  first_name: string;
+  last_name: string;
+  role_name: PlatformUserRole;
+};
+
+type PlatformUserRole = "ADMIN" | "SUPPORT" | "FINANCE";
+
 const EMPTY_FORM: OnboardingForm = {
   restaurant_name: "",
   restaurant_code: "",
@@ -61,17 +75,27 @@ const EMPTY_FORM: OnboardingForm = {
   owner_last_name: "",
 };
 
+const EMPTY_PLATFORM_USER_FORM: PlatformUserForm = {
+  email: "",
+  first_name: "",
+  last_name: "",
+  role_name: "SUPPORT",
+};
+
 const PLATFORM_AUDIT_ACTIONS = [
   "RESTAURANT_ONBOARDED",
   "OWNER_INVITED",
   "PASSWORD_SETUP_LINK_CREATED",
   "RESTAURANT_LIFECYCLE_UPDATED",
   "RESTAURANT_SUBSCRIPTION_UPDATED",
+  "PLATFORM_USER_INVITED",
+  "PLATFORM_USER_UPDATED",
+  "PLATFORM_PASSWORD_SETUP_LINK_CREATED",
   "BRANCH_CREATED",
   "BRANCH_UPDATED",
 ];
 
-const PLATFORM_AUDIT_ENTITIES = ["restaurant", "branch", "user"];
+const PLATFORM_AUDIT_ENTITIES = ["restaurant", "branch", "user", "platform_user"];
 
 function setupUrlFromInvite(invite: RestaurantOnboardingResponse["invite"]) {
   return `${window.location.origin}${invite.setup_url_path}`;
@@ -126,14 +150,26 @@ function statusPillClass(status: string) {
     : "status-pill";
 }
 
-export function PlatformAdminView({ token, module }: Props) {
+function auditTenantLabel(log: AuditLog, tenantNameById: Map<string, string>) {
+  if (!log.restaurant_id) {
+    return "Platform";
+  }
+  return tenantNameById.get(log.restaurant_id) ?? log.restaurant_id;
+}
+
+export function PlatformAdminView({ token, module, roleName }: Props) {
   const [restaurants, setRestaurants] = useState<PlatformRestaurantSummary[]>([]);
+  const [platformUsers, setPlatformUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [form, setForm] = useState<OnboardingForm>(EMPTY_FORM);
+  const [platformUserForm, setPlatformUserForm] =
+    useState<PlatformUserForm>(EMPTY_PLATFORM_USER_FORM);
   const [latestOnboarding, setLatestOnboarding] = useState<RestaurantOnboardingResponse | null>(
     null,
   );
   const [latestOwnerLink, setLatestOwnerLink] = useState<PasswordSetupToken | null>(null);
+  const [latestPlatformUserLink, setLatestPlatformUserLink] =
+    useState<PasswordSetupToken | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -197,6 +233,22 @@ export function PlatformAdminView({ token, module }: Props) {
       ),
     [restaurants],
   );
+  const activeAdminCount = useMemo(
+    () =>
+      platformUsers.filter((user) => user.role_name === "ADMIN" && user.is_active).length,
+    [platformUsers],
+  );
+  const activeSupportCount = useMemo(
+    () =>
+      platformUsers.filter((user) => user.role_name === "SUPPORT" && user.is_active).length,
+    [platformUsers],
+  );
+  const activeFinanceCount = useMemo(
+    () =>
+      platformUsers.filter((user) => user.role_name === "FINANCE" && user.is_active).length,
+    [platformUsers],
+  );
+  const canManagePlatform = roleName === "ADMIN";
 
   const loadRestaurants = useCallback(async () => {
     setIsLoading(true);
@@ -236,6 +288,19 @@ export function PlatformAdminView({ token, module }: Props) {
     }
   }, [auditAction, auditDateFrom, auditDateTo, auditEntityType, token]);
 
+  const loadPlatformUsers = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const nextUsers = await apiRequest<User[]>("/api/v1/auth/platform-users", { token });
+      setPlatformUsers(nextUsers);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load platform users");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     void loadRestaurants();
   }, [loadRestaurants]);
@@ -244,10 +309,20 @@ export function PlatformAdminView({ token, module }: Props) {
     if (module === "audit") {
       void loadLogs();
     }
-  }, [loadLogs, module]);
+    if (module === "users") {
+      void loadPlatformUsers();
+    }
+  }, [loadLogs, loadPlatformUsers, module]);
 
   function updateField<K extends keyof OnboardingForm>(field: K, value: OnboardingForm[K]) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updatePlatformUserField<K extends keyof PlatformUserForm>(
+    field: K,
+    value: PlatformUserForm[K],
+  ) {
+    setPlatformUserForm((current) => ({ ...current, [field]: value }));
   }
 
   async function onboardRestaurant(event: React.FormEvent) {
@@ -294,6 +369,18 @@ export function PlatformAdminView({ token, module }: Props) {
     try {
       await navigator.clipboard.writeText(setupUrlFromInvite(invite));
       setNotice("Owner setup link copied");
+    } catch {
+      setError("Could not copy link. Select the link and copy it manually.");
+    }
+  }
+
+  async function copyPlatformUserSetupUrl() {
+    if (!latestPlatformUserLink) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(setupUrlFromInvite(latestPlatformUserLink));
+      setNotice("Platform user setup link copied");
     } catch {
       setError("Could not copy link. Select the link and copy it manually.");
     }
@@ -395,6 +482,78 @@ export function PlatformAdminView({ token, module }: Props) {
     }
   }
 
+  async function invitePlatformUser(event: React.FormEvent) {
+    event.preventDefault();
+    setNotice(null);
+    setError(null);
+    setLatestPlatformUserLink(null);
+    setIsSubmitting(true);
+    try {
+      const invite = await apiRequest<PlatformUserInviteResponse>(
+        "/api/v1/auth/platform-users/invite",
+        {
+          method: "POST",
+          token,
+          body: {
+            email: platformUserForm.email.trim(),
+            first_name: platformUserForm.first_name.trim(),
+            last_name: platformUserForm.last_name.trim(),
+            role_name: platformUserForm.role_name,
+          },
+        },
+      );
+      setLatestPlatformUserLink(invite.invite);
+      setPlatformUserForm(EMPTY_PLATFORM_USER_FORM);
+      setNotice(`${invite.user.email} platform setup link created`);
+      await loadPlatformUsers();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not invite platform user");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function updatePlatformUser(user: User, patch: Partial<User>) {
+    setNotice(null);
+    setError(null);
+    setActionRestaurantId(user.id);
+    try {
+      await apiRequest(`/api/v1/auth/platform-users/${user.id}`, {
+        method: "PATCH",
+        token,
+        body: patch,
+      });
+      setNotice(`${user.email} updated`);
+      await loadPlatformUsers();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update platform user");
+    } finally {
+      setActionRestaurantId(null);
+    }
+  }
+
+  async function createPlatformUserSetupLink(user: User) {
+    setNotice(null);
+    setError(null);
+    setLatestPlatformUserLink(null);
+    setActionRestaurantId(user.id);
+    try {
+      const invite = await apiRequest<PasswordSetupToken>(
+        `/api/v1/auth/platform-users/${user.id}/password-reset`,
+        {
+          method: "POST",
+          token,
+        },
+      );
+      setLatestPlatformUserLink(invite);
+      setNotice(`${user.email} setup link created`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create setup link");
+    } finally {
+      setActionRestaurantId(null);
+    }
+  }
+
   function renderOwnerSetupLink() {
     if (!latestOnboarding && !latestOwnerLink) {
       return null;
@@ -415,6 +574,23 @@ export function PlatformAdminView({ token, module }: Props) {
             <span>{latestOnboarding.owner.email}</span>
           </div>
         ) : null}
+      </Panel>
+    );
+  }
+
+  function renderPlatformUserSetupLink() {
+    if (!latestPlatformUserLink) {
+      return null;
+    }
+    return (
+      <Panel title="Platform User Setup Link">
+        <div className="invite-link-box">
+          <input readOnly value={setupUrlFromInvite(latestPlatformUserLink)} />
+          <button className="secondary-action" type="button" onClick={copyPlatformUserSetupUrl}>
+            <Copy size={17} />
+            Copy
+          </button>
+        </div>
       </Panel>
     );
   }
@@ -513,90 +689,92 @@ export function PlatformAdminView({ token, module }: Props) {
           <Stat label="Suspended" value={suspendedCount} tone="warn" />
           <Stat label="Tenants listed" value={restaurants.length} />
         </div>
-        {renderOwnerSetupLink()}
+        {canManagePlatform ? renderOwnerSetupLink() : null}
         <div className="view-grid two-columns">
-          <Panel title="Add Restaurant">
-            <form className="tenant-onboarding-form" onSubmit={onboardRestaurant}>
-              <div className="form-section-title">
-                <Store size={17} />
-                Restaurant
-              </div>
-              <Field label="Restaurant name">
-                <input
-                  value={form.restaurant_name}
-                  onChange={(event) => updateField("restaurant_name", event.target.value)}
-                  placeholder="KFC"
-                  required
-                />
-              </Field>
-              <Field label="Restaurant code">
-                <input
-                  value={form.restaurant_code}
-                  onChange={(event) => updateField("restaurant_code", event.target.value)}
-                  placeholder="KFC"
-                  maxLength={12}
-                />
-              </Field>
-              <div className="form-section-title">
-                <Building2 size={17} />
-                First branch
-              </div>
-              <Field label="Branch name">
-                <input
-                  value={form.branch_name}
-                  onChange={(event) => updateField("branch_name", event.target.value)}
-                  placeholder="Main Mall"
-                  required
-                />
-              </Field>
-              <Field label="Branch code">
-                <input
-                  value={form.branch_code}
-                  onChange={(event) => updateField("branch_code", event.target.value)}
-                  placeholder="MM"
-                  maxLength={12}
-                />
-              </Field>
-              <Field label="Branch location">
-                <input
-                  value={form.branch_location}
-                  onChange={(event) => updateField("branch_location", event.target.value)}
-                  placeholder="Gaborone"
-                />
-              </Field>
-              <div className="form-section-title">
-                <UserPlus size={17} />
-                Owner
-              </div>
-              <Field label="Owner email">
-                <input
-                  type="email"
-                  value={form.owner_email}
-                  onChange={(event) => updateField("owner_email", event.target.value)}
-                  placeholder="owner@example.com"
-                  required
-                />
-              </Field>
-              <Field label="First name">
-                <input
-                  value={form.owner_first_name}
-                  onChange={(event) => updateField("owner_first_name", event.target.value)}
-                  required
-                />
-              </Field>
-              <Field label="Last name">
-                <input
-                  value={form.owner_last_name}
-                  onChange={(event) => updateField("owner_last_name", event.target.value)}
-                  required
-                />
-              </Field>
-              <button className="primary-action" type="submit" disabled={isSubmitting}>
-                <Plus size={18} />
-                {isSubmitting ? "Creating tenant" : "Create tenant"}
-              </button>
-            </form>
-          </Panel>
+          {canManagePlatform ? (
+            <Panel title="Add Restaurant">
+              <form className="tenant-onboarding-form" onSubmit={onboardRestaurant}>
+                <div className="form-section-title">
+                  <Store size={17} />
+                  Restaurant
+                </div>
+                <Field label="Restaurant name">
+                  <input
+                    value={form.restaurant_name}
+                    onChange={(event) => updateField("restaurant_name", event.target.value)}
+                    placeholder="KFC"
+                    required
+                  />
+                </Field>
+                <Field label="Restaurant code">
+                  <input
+                    value={form.restaurant_code}
+                    onChange={(event) => updateField("restaurant_code", event.target.value)}
+                    placeholder="KFC"
+                    maxLength={12}
+                  />
+                </Field>
+                <div className="form-section-title">
+                  <Building2 size={17} />
+                  First branch
+                </div>
+                <Field label="Branch name">
+                  <input
+                    value={form.branch_name}
+                    onChange={(event) => updateField("branch_name", event.target.value)}
+                    placeholder="Main Mall"
+                    required
+                  />
+                </Field>
+                <Field label="Branch code">
+                  <input
+                    value={form.branch_code}
+                    onChange={(event) => updateField("branch_code", event.target.value)}
+                    placeholder="MM"
+                    maxLength={12}
+                  />
+                </Field>
+                <Field label="Branch location">
+                  <input
+                    value={form.branch_location}
+                    onChange={(event) => updateField("branch_location", event.target.value)}
+                    placeholder="Gaborone"
+                  />
+                </Field>
+                <div className="form-section-title">
+                  <UserPlus size={17} />
+                  Owner
+                </div>
+                <Field label="Owner email">
+                  <input
+                    type="email"
+                    value={form.owner_email}
+                    onChange={(event) => updateField("owner_email", event.target.value)}
+                    placeholder="owner@example.com"
+                    required
+                  />
+                </Field>
+                <Field label="First name">
+                  <input
+                    value={form.owner_first_name}
+                    onChange={(event) => updateField("owner_first_name", event.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Last name">
+                  <input
+                    value={form.owner_last_name}
+                    onChange={(event) => updateField("owner_last_name", event.target.value)}
+                    required
+                  />
+                </Field>
+                <button className="primary-action" type="submit" disabled={isSubmitting}>
+                  <Plus size={18} />
+                  {isSubmitting ? "Creating tenant" : "Create tenant"}
+                </button>
+              </form>
+            </Panel>
+          ) : null}
           <Panel
             title="Tenants"
             action={
@@ -638,7 +816,7 @@ export function PlatformAdminView({ token, module }: Props) {
                       <span>{restaurant.owner_email ?? "No owner email"}</span>
                     </div>
                   </div>
-                  {renderTenantActions(restaurant)}
+                  {canManagePlatform ? renderTenantActions(restaurant) : null}
                 </article>
               ))}
               {!restaurants.length ? <EmptyState>No restaurants onboarded yet</EmptyState> : null}
@@ -692,6 +870,7 @@ export function PlatformAdminView({ token, module }: Props) {
                         <span>Subscription</span>
                         <select
                           value={subscriptionDraft.subscription_status}
+                          disabled={!canManagePlatform}
                           onChange={(event) =>
                             updateSubscriptionDraft(restaurant, {
                               subscription_status: event.target
@@ -710,6 +889,7 @@ export function PlatformAdminView({ token, module }: Props) {
                         <input
                           type="date"
                           value={subscriptionDraft.subscription_started_at}
+                          disabled={!canManagePlatform}
                           onChange={(event) =>
                             updateSubscriptionDraft(restaurant, {
                               subscription_started_at: event.target.value,
@@ -722,6 +902,7 @@ export function PlatformAdminView({ token, module }: Props) {
                         <input
                           type="date"
                           value={subscriptionDraft.subscription_renews_at}
+                          disabled={!canManagePlatform}
                           onChange={(event) =>
                             updateSubscriptionDraft(restaurant, {
                               subscription_renews_at: event.target.value,
@@ -729,15 +910,17 @@ export function PlatformAdminView({ token, module }: Props) {
                           }
                         />
                       </label>
-                      <button
-                        className="secondary-action"
-                        type="button"
-                        onClick={() => void updateSubscription(restaurant)}
-                        disabled={actionRestaurantId === restaurant.id}
-                      >
-                        <CreditCard size={17} />
-                        Save
-                      </button>
+                      {canManagePlatform ? (
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          onClick={() => void updateSubscription(restaurant)}
+                          disabled={actionRestaurantId === restaurant.id}
+                        >
+                          <CreditCard size={17} />
+                          Save
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </article>
@@ -801,6 +984,147 @@ export function PlatformAdminView({ token, module }: Props) {
             {!restaurants.length ? <EmptyState>No tenant health data yet</EmptyState> : null}
           </div>
         </Panel>
+      </>
+    );
+  }
+
+  function renderPlatformUsersModule() {
+    return (
+      <>
+        <div className="stats-grid">
+          <Stat label="Active admins" value={activeAdminCount} tone="good" />
+          <Stat label="Active support" value={activeSupportCount} />
+          <Stat label="Active finance" value={activeFinanceCount} />
+          <Stat label="Platform users" value={platformUsers.length} />
+        </div>
+        {renderPlatformUserSetupLink()}
+        <div className="view-grid two-columns">
+          <Panel title="Invite Platform User">
+            <form className="tenant-onboarding-form" onSubmit={invitePlatformUser}>
+              <div className="form-section-title">
+                <Users size={17} />
+                Platform access
+              </div>
+              <Field label="Email">
+                <input
+                  type="email"
+                  value={platformUserForm.email}
+                  onChange={(event) => updatePlatformUserField("email", event.target.value)}
+                  placeholder="support@cognivex.com"
+                  required
+                />
+              </Field>
+              <Field label="First name">
+                <input
+                  value={platformUserForm.first_name}
+                  onChange={(event) => updatePlatformUserField("first_name", event.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Last name">
+                <input
+                  value={platformUserForm.last_name}
+                  onChange={(event) => updatePlatformUserField("last_name", event.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Role">
+                <select
+                  value={platformUserForm.role_name}
+                  onChange={(event) =>
+                    updatePlatformUserField("role_name", event.target.value as PlatformUserRole)
+                  }
+                >
+                  <option value="SUPPORT">Support</option>
+                  <option value="FINANCE">Finance</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </Field>
+              <button className="primary-action" type="submit" disabled={isSubmitting}>
+                <UserPlus size={18} />
+                {isSubmitting ? "Creating user" : "Invite platform user"}
+              </button>
+            </form>
+          </Panel>
+
+          <Panel
+            title="Platform Users"
+            action={
+              <button className="icon-button" type="button" onClick={loadPlatformUsers}>
+                <RefreshCw size={17} />
+              </button>
+            }
+          >
+            <div className="tenant-list">
+              {platformUsers.map((user) => (
+                <article className="tenant-card tenant-card-compact" key={user.id}>
+                  <div className="tenant-card-heading">
+                    <span className={statusPillClass(user.is_active ? "ACTIVE" : "SUSPENDED")}>
+                      {user.is_active ? "ACTIVE" : "INACTIVE"}
+                    </span>
+                    <span className="status-pill">{user.role_name}</span>
+                  </div>
+                  <div className="tenant-card-body">
+                    <h3>
+                      {user.first_name} {user.last_name}
+                    </h3>
+                    <span>{user.email}</span>
+                    <div className="tenant-card-meta">
+                      <span>Created {formatDateTime(user.created_at)}</span>
+                      <span>{user.restaurant_id ? "Tenant scoped" : "Platform scoped"}</span>
+                    </div>
+                  </div>
+                  <div className="tenant-card-actions">
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      onClick={() => void createPlatformUserSetupLink(user)}
+                      disabled={actionRestaurantId === user.id || !user.is_active}
+                    >
+                      <KeyRound size={17} />
+                      Setup link
+                    </button>
+                    <select
+                      value={user.role_name ?? "SUPPORT"}
+                      onChange={(event) =>
+                        void updatePlatformUser(user, {
+                          role_name: event.target.value as User["role_name"],
+                        })
+                      }
+                      disabled={actionRestaurantId === user.id}
+                    >
+                      <option value="ADMIN">Admin</option>
+                      <option value="SUPPORT">Support</option>
+                      <option value="FINANCE">Finance</option>
+                    </select>
+                    {user.is_active ? (
+                      <button
+                        className="secondary-action danger-action"
+                        type="button"
+                        onClick={() => void updatePlatformUser(user, { is_active: false })}
+                        disabled={actionRestaurantId === user.id}
+                      >
+                        <PowerOff size={17} />
+                        Deactivate
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={() => void updatePlatformUser(user, { is_active: true })}
+                        disabled={actionRestaurantId === user.id}
+                      >
+                        <Power size={17} />
+                        Reactivate
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {!platformUsers.length ? <EmptyState>No platform users found</EmptyState> : null}
+            </div>
+          </Panel>
+        </div>
       </>
     );
   }
@@ -877,7 +1201,7 @@ export function PlatformAdminView({ token, module }: Props) {
                 <div>
                   <strong>{formatAction(log.action)}</strong>
                   <span>
-                    {tenantNameById.get(log.restaurant_id) ?? log.restaurant_id} |{" "}
+                    {auditTenantLabel(log, tenantNameById)} |{" "}
                     {log.user_name ?? log.user_email ?? "System"} | {formatDateTime(log.created_at)}
                   </span>
                 </div>
@@ -912,6 +1236,7 @@ export function PlatformAdminView({ token, module }: Props) {
       {module === "tenants" ? renderTenantsModule() : null}
       {module === "subscriptions" ? renderSubscriptionsModule() : null}
       {module === "health" ? renderHealthModule() : null}
+      {module === "users" ? renderPlatformUsersModule() : null}
       {module === "audit" ? renderAuditModule() : null}
     </div>
   );

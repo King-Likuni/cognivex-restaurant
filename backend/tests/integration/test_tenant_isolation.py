@@ -228,6 +228,122 @@ def test_admin_can_create_owner_setup_link(
     assert preview_response.json()["email"] == "owner@example.com"
 
 
+def test_admin_can_manage_platform_users_with_safety_checks(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    admin_id = str(seeded_restaurant["admin"].id)
+
+    forbidden_list_response = api_client.get(
+        "/api/v1/auth/platform-users",
+        headers=owner_headers,
+    )
+    assert forbidden_list_response.status_code == 403
+
+    invite_response = api_client.post(
+        "/api/v1/auth/platform-users/invite",
+        headers=admin_headers,
+        json={
+            "email": "support@example.com",
+            "first_name": "Platform",
+            "last_name": "Support",
+            "role_name": "SUPPORT",
+        },
+    )
+    assert invite_response.status_code == 201, invite_response.text
+    invite_payload = invite_response.json()
+    assert invite_payload["user"]["role_name"] == "SUPPORT"
+    assert invite_payload["user"]["restaurant_id"] is None
+
+    preview_response = api_client.get(
+        f"/api/v1/auth/password-setup/{invite_payload['invite']['token']}"
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    assert preview_response.json()["email"] == "support@example.com"
+
+    setup_response = api_client.post(
+        "/api/v1/auth/password-setup/confirm",
+        json={"token": invite_payload["invite"]["token"], "password": "supportpassword"},
+    )
+    assert setup_response.status_code == 200, setup_response.text
+    support_login_response = api_client.post(
+        "/api/v1/auth/login",
+        data={"username": "support@example.com", "password": "supportpassword"},
+    )
+    assert support_login_response.status_code == 200, support_login_response.text
+    support_headers = {"Authorization": f"Bearer {support_login_response.json()['access_token']}"}
+
+    platform_summary_response = api_client.get(
+        "/api/v1/restaurants/platform",
+        headers=support_headers,
+    )
+    assert platform_summary_response.status_code == 200, platform_summary_response.text
+
+    support_audit_response = api_client.get(
+        "/api/v1/platform/audit-logs/",
+        headers=support_headers,
+    )
+    assert support_audit_response.status_code == 200, support_audit_response.text
+
+    support_invite_response = api_client.post(
+        "/api/v1/auth/platform-users/invite",
+        headers=support_headers,
+        json={
+            "email": "another-support@example.com",
+            "first_name": "Another",
+            "last_name": "Support",
+            "role_name": "SUPPORT",
+        },
+    )
+    assert support_invite_response.status_code == 403
+
+    platform_users_response = api_client.get("/api/v1/auth/platform-users", headers=admin_headers)
+    assert platform_users_response.status_code == 200, platform_users_response.text
+    support_user = next(
+        user for user in platform_users_response.json() if user["email"] == "support@example.com"
+    )
+
+    update_response = api_client.patch(
+        f"/api/v1/auth/platform-users/{support_user['id']}",
+        headers=admin_headers,
+        json={"role_name": "FINANCE", "is_active": False},
+    )
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["role_name"] == "FINANCE"
+    assert update_response.json()["is_active"] is False
+    assert (
+        api_client.post(
+            "/api/v1/auth/login",
+            data={"username": "support@example.com", "password": "supportpassword"},
+        ).status_code
+        == 401
+    )
+
+    inactive_reset_response = api_client.post(
+        f"/api/v1/auth/platform-users/{support_user['id']}/password-reset",
+        headers=admin_headers,
+    )
+    assert inactive_reset_response.status_code == 400
+
+    self_deactivate_response = api_client.patch(
+        f"/api/v1/auth/platform-users/{admin_id}",
+        headers=admin_headers,
+        json={"is_active": False},
+    )
+    assert self_deactivate_response.status_code == 400
+
+    audit_response = api_client.get(
+        "/api/v1/platform/audit-logs/",
+        headers=admin_headers,
+        params={"action": "PLATFORM_USER_UPDATED"},
+    )
+    assert audit_response.status_code == 200, audit_response.text
+    assert audit_response.json()[0]["restaurant_id"] is None
+    assert audit_response.json()[0]["entity_type"] == "platform_user"
+
+
 def test_admin_can_update_tenant_subscription_status(
     api_client: TestClient,
     seeded_restaurant: dict[str, object],

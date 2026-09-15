@@ -48,6 +48,7 @@ type ViewKey =
   | "platform-tenants"
   | "platform-subscriptions"
   | "platform-health"
+  | "platform-users"
   | "platform-audit"
   | "cashier"
   | "kitchen"
@@ -59,11 +60,13 @@ type ViewKey =
 
 const STORAGE_KEY = "cognivex.session";
 const BRANCH_STORAGE_KEY = "cognivex.branchId";
+const PLATFORM_ROLES = new Set<RoleName>(["ADMIN", "SUPPORT", "FINANCE"]);
 
 const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = [
   { key: "platform-tenants", label: "Tenants", icon: Store },
   { key: "platform-subscriptions", label: "Subscriptions", icon: CreditCard },
   { key: "platform-health", label: "Tenant Health", icon: BarChart3 },
+  { key: "platform-users", label: "Platform Users", icon: Users },
   { key: "platform-audit", label: "Platform Audit", icon: ClipboardList },
   { key: "cashier", label: "Cashier", icon: ShoppingCart },
   { key: "kitchen", label: "Kitchen", icon: ChefHat },
@@ -75,7 +78,15 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
 ];
 
 const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
-  ADMIN: ["platform-tenants", "platform-subscriptions", "platform-health", "platform-audit"],
+  ADMIN: [
+    "platform-tenants",
+    "platform-subscriptions",
+    "platform-health",
+    "platform-users",
+    "platform-audit",
+  ],
+  SUPPORT: ["platform-tenants", "platform-health", "platform-audit"],
+  FINANCE: ["platform-subscriptions", "platform-health", "platform-audit"],
   OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier", "kitchen", "inventory", "dashboard"],
@@ -87,6 +98,7 @@ const PLATFORM_MODULE_BY_VIEW: Partial<Record<ViewKey, PlatformAdminModule>> = {
   "platform-tenants": "tenants",
   "platform-subscriptions": "subscriptions",
   "platform-health": "health",
+  "platform-users": "users",
   "platform-audit": "audit",
 };
 
@@ -174,14 +186,14 @@ function OperationsApp() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const token = session?.token ?? null;
+  const roleName = session?.user.role_name ?? null;
   const visibleNavItems = useMemo(() => {
-    if (!session) {
+    if (!roleName) {
       return [];
     }
-    const roleName = session.user.role_name;
     const allowedViews = roleName ? ROLE_VIEWS[roleName] ?? [] : [];
     return NAV_ITEMS.filter((item) => allowedViews.includes(item.key));
-  }, [session]);
+  }, [roleName]);
   const branchOptions = useMemo(() => {
     const operationalBranches = branches.filter((branch) => !isPlaceholderBranch(branch));
     return operationalBranches.length ? operationalBranches : branches;
@@ -191,7 +203,7 @@ function OperationsApp() {
     if (!session) {
       return;
     }
-    if (session.user.role_name === "ADMIN") {
+    if (roleName && PLATFORM_ROLES.has(roleName)) {
       setContext(null);
       setBranches([]);
       setError(null);
@@ -227,7 +239,7 @@ function OperationsApp() {
     } finally {
       setIsLoading(false);
     }
-  }, [session]);
+  }, [roleName, session]);
 
   useEffect(() => {
     void loadContext();
@@ -240,7 +252,7 @@ function OperationsApp() {
   }, [view, visibleNavItems]);
 
   const title = useMemo(() => {
-    if (session?.user.role_name === "ADMIN") {
+    if (roleName && PLATFORM_ROLES.has(roleName)) {
       if (view === "platform-tenants") {
         return "Platform / Tenants";
       }
@@ -249,6 +261,9 @@ function OperationsApp() {
       }
       if (view === "platform-health") {
         return "Platform / Tenant Health";
+      }
+      if (view === "platform-users") {
+        return "Platform / Users";
       }
       if (view === "platform-audit") {
         return "Platform / Audit";
@@ -259,7 +274,7 @@ function OperationsApp() {
       return "Operations Console";
     }
     return `${context.restaurant.name} / ${context.branch.name}`;
-  }, [context, session?.user.role_name, view]);
+  }, [context, roleName, view]);
 
   if (!session) {
     return <LoginScreen onLogin={setSession} />;
@@ -362,7 +377,11 @@ function OperationsApp() {
               </Notice>
             ) : null}
             {platformModule && visibleNavItems.some((item) => item.key === view) ? (
-              <PlatformAdminView token={token} module={platformModule} />
+              <PlatformAdminView
+                token={token}
+                module={platformModule}
+                roleName={roleName}
+              />
             ) : null}
             {view === "cashier" && visibleNavItems.some((item) => item.key === "cashier") ? (
               context ? <CashierView context={context} token={token} /> : null

@@ -1,7 +1,15 @@
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
 
-export type RoleName = "ADMIN" | "OWNER" | "MANAGER" | "CASHIER" | "KITCHEN" | "INVENTORY";
+export type RoleName =
+  | "ADMIN"
+  | "SUPPORT"
+  | "FINANCE"
+  | "OWNER"
+  | "MANAGER"
+  | "CASHIER"
+  | "KITCHEN"
+  | "INVENTORY";
 
 export type User = {
   id: string;
@@ -23,6 +31,11 @@ export type PasswordSetupToken = {
 };
 
 export type StaffInviteResponse = {
+  user: User;
+  invite: PasswordSetupToken;
+};
+
+export type PlatformUserInviteResponse = {
   user: User;
   invite: PasswordSetupToken;
 };
@@ -265,7 +278,7 @@ export type DailySalesReport = {
 
 export type AuditLog = {
   id: string;
-  restaurant_id: string;
+  restaurant_id: string | null;
   user_id: string | null;
   user_email: string | null;
   user_name: string | null;
