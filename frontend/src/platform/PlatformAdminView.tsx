@@ -101,19 +101,19 @@ function setupUrlFromInvite(invite: RestaurantOnboardingResponse["invite"]) {
   return `${window.location.origin}${invite.setup_url_path}`;
 }
 
-function formatAction(value: string) {
-  return value
+function formatAction(value: string | null | undefined) {
+  return (value || "unknown")
     .toLowerCase()
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
-function formatMoney(value: string | number) {
-  return `BWP ${Number(value).toFixed(2)}`;
+function formatMoney(value: string | number | null | undefined) {
+  return `BWP ${Number(value || 0).toFixed(2)}`;
 }
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return "Not set";
   }
@@ -123,7 +123,7 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function toDateInputValue(value: string | null) {
+function toDateInputValue(value: string | null | undefined) {
   if (!value) {
     return "";
   }
@@ -144,7 +144,7 @@ function summarizeValues(values: Record<string, unknown> | null) {
     .join(" | ");
 }
 
-function statusPillClass(status: string) {
+function statusPillClass(status: string | null | undefined) {
   return status === "SUSPENDED" ||
     status === "OVERDUE" ||
     status === "CANCELLED" ||
@@ -158,6 +158,10 @@ function auditTenantLabel(log: AuditLog, tenantNameById: Map<string, string>) {
     return "Platform";
   }
   return tenantNameById.get(log.restaurant_id) ?? log.restaurant_id;
+}
+
+function orderAccessStatus(restaurant: PlatformRestaurantSummary) {
+  return restaurant.order_access_status || "ACTIVE";
 }
 
 export function PlatformAdminView({ token, module, roleName }: Props) {
@@ -864,8 +868,8 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                     <span className={statusPillClass(restaurant.status)}>
                       {restaurant.status.replace("_", " ")}
                     </span>
-                    <span className={statusPillClass(restaurant.order_access_status)}>
-                      Orders {formatAction(restaurant.order_access_status)}
+                    <span className={statusPillClass(orderAccessStatus(restaurant))}>
+                      Orders {formatAction(orderAccessStatus(restaurant))}
                     </span>
                   </div>
                   <div className="tenant-card-body">
@@ -969,8 +973,8 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                   <span className={statusPillClass(restaurant.subscription_status)}>
                     {restaurant.subscription_status}
                   </span>
-                  <span className={statusPillClass(restaurant.order_access_status)}>
-                    Orders {formatAction(restaurant.order_access_status)}
+                  <span className={statusPillClass(orderAccessStatus(restaurant))}>
+                    Orders {formatAction(orderAccessStatus(restaurant))}
                   </span>
                 </div>
                 <div className="tenant-card-body">
@@ -985,7 +989,7 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                     <span>{restaurant.low_stock_alert_count} low stock alerts</span>
                     <span>{restaurant.branch_count} branches</span>
                     <span>{restaurant.active_user_count} users</span>
-                    <span>{formatAction(restaurant.order_access_status)} order access</span>
+                    <span>{formatAction(orderAccessStatus(restaurant))} order access</span>
                   </div>
                   {restaurant.order_access_message ? (
                     <p className="tenant-warning">{restaurant.order_access_message}</p>
