@@ -83,6 +83,10 @@ class RestaurantLifecycleUpdate(BaseModel):
     suspension_reason: str | None = Field(default=None, max_length=300)
 
 
+class RestaurantPlatformNotesUpdate(BaseModel):
+    platform_notes: str | None = Field(default=None, max_length=2000)
+
+
 class RestaurantSubscriptionUpdate(BaseModel):
     subscription_status: Literal["TRIAL", "ACTIVE", "OVERDUE", "CANCELLED"]
     subscription_started_at: datetime | None = None
@@ -98,6 +102,7 @@ class PlatformRestaurantSummary(BaseModel):
     subscription_started_at: datetime | None
     subscription_renews_at: datetime | None
     suspension_reason: str | None
+    platform_notes: str | None
     is_active: bool
     branch_count: int
     active_user_count: int

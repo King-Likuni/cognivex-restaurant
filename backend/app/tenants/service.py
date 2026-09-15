@@ -30,6 +30,7 @@ from app.tenants.schemas import (
     PlatformRestaurantSummary,
     RestaurantCreate,
     RestaurantOnboardingCreate,
+    RestaurantPlatformNotesUpdate,
     RestaurantSettingsUpdate,
     RestaurantSubscriptionUpdate,
 )
@@ -406,6 +407,7 @@ def platform_restaurant_summary(db: Session, restaurant: Restaurant) -> Platform
         subscription_started_at=restaurant.subscription_started_at,
         subscription_renews_at=restaurant.subscription_renews_at,
         suspension_reason=restaurant.suspension_reason,
+        platform_notes=restaurant.platform_notes,
         is_active=restaurant.is_active,
         branch_count=branch_count,
         active_user_count=active_user_count,
@@ -437,6 +439,36 @@ def list_platform_restaurants(db: Session) -> list[PlatformRestaurantSummary]:
     return [platform_restaurant_summary(db, restaurant) for restaurant in restaurants]
 
 
+def update_restaurant_platform_notes(
+    db: Session,
+    restaurant_id: UUID,
+    data: RestaurantPlatformNotesUpdate,
+    *,
+    changed_by: User,
+) -> Restaurant | None:
+    restaurant = get_restaurant(db, restaurant_id)
+    if restaurant is None:
+        return None
+
+    next_notes = data.platform_notes.strip() if data.platform_notes else None
+    old_values = {"platform_notes": restaurant.platform_notes}
+    restaurant.platform_notes = next_notes
+    db.add(
+        AuditLog(
+            restaurant_id=restaurant.id,
+            user_id=changed_by.id,
+            action="RESTAURANT_PLATFORM_NOTES_UPDATED",
+            entity_type="restaurant",
+            entity_id=restaurant.id,
+            old_values=old_values,
+            new_values={"platform_notes": restaurant.platform_notes},
+        )
+    )
+    db.commit()
+    db.refresh(restaurant)
+    return restaurant
+
+
 def update_restaurant_lifecycle(
     db: Session,
     restaurant_id: UUID,
@@ -453,6 +485,10 @@ def update_restaurant_lifecycle(
     if normalized_status not in {TENANT_ACTIVE, TENANT_SUSPENDED}:
         raise ValueError("Restaurant status must be ACTIVE or SUSPENDED")
 
+    cleaned_reason = suspension_reason.strip() if suspension_reason else None
+    if normalized_status == TENANT_SUSPENDED and not cleaned_reason:
+        raise ValueError("Suspension reason is required")
+
     previous_values = {
         "status": restaurant.status,
         "is_active": restaurant.is_active,
@@ -460,11 +496,7 @@ def update_restaurant_lifecycle(
     }
     restaurant.status = normalized_status
     restaurant.is_active = normalized_status != TENANT_SUSPENDED
-    restaurant.suspension_reason = (
-        suspension_reason.strip()
-        if normalized_status == TENANT_SUSPENDED and suspension_reason
-        else None
-    )
+    restaurant.suspension_reason = cleaned_reason if normalized_status == TENANT_SUSPENDED else None
     db.add(
         AuditLog(
             restaurant_id=restaurant.id,

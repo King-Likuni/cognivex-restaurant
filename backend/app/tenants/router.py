@@ -26,6 +26,7 @@ from app.tenants.schemas import (
     RestaurantLifecycleUpdate,
     RestaurantOnboardingCreate,
     RestaurantOnboardingResponse,
+    RestaurantPlatformNotesUpdate,
     RestaurantResponse,
     RestaurantSettingsResponse,
     RestaurantSettingsUpdate,
@@ -135,6 +136,28 @@ def update_restaurant_lifecycle(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if restaurant is None:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    return restaurant
+
+
+@router.patch(
+    "/{restaurant_id}/platform-notes",
+    response_model=RestaurantResponse,
+)
+def update_restaurant_platform_notes(
+    restaurant_id: UUID,
+    data: RestaurantPlatformNotesUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Update private platform-only tenant notes. Platform admins only."""
+    restaurant = service.update_restaurant_platform_notes(
+        db,
+        restaurant_id,
+        data,
+        changed_by=current_user,
+    )
     if restaurant is None:
         raise HTTPException(status_code=404, detail="Restaurant not found")
     return restaurant

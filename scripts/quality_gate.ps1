@@ -246,6 +246,18 @@ try {
     }
 
     if ($WithSmoke -or ($WithE2E -and -not $SkipFrontend)) {
+        Ensure-LocalDataServices
+        Invoke-Step "Local database migrations" {
+            Push-Location $BackendRoot
+            try {
+                & $Python -m alembic upgrade head
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Local database migrations failed."
+                }
+            } finally {
+                Pop-Location
+            }
+        }
         $QualityBackendProcess = Start-QualityBackend
     }
 

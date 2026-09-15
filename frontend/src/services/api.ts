@@ -72,6 +72,7 @@ export type RestaurantLifecycleStatus = "ACTIVE" | "SUSPENDED";
 export type RestaurantSubscriptionStatus = "TRIAL" | "ACTIVE" | "OVERDUE" | "CANCELLED";
 
 export type PlatformRestaurantSummary = Restaurant & {
+  platform_notes: string | null;
   branch_count: number;
   active_user_count: number;
   owner_email: string | null;

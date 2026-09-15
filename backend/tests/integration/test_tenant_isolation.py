@@ -177,14 +177,23 @@ def test_admin_can_suspend_and_reactivate_restaurant_access(
     restaurant_id = str(seeded_restaurant["restaurant"].id)
     admin_headers = login(api_client, "admin@example.com", "adminpassword")
 
-    suspend_response = api_client.patch(
+    missing_reason_response = api_client.patch(
         f"/api/v1/restaurants/{restaurant_id}/lifecycle",
         headers=admin_headers,
         json={"status": "SUSPENDED"},
     )
+    assert missing_reason_response.status_code == 400
+    assert missing_reason_response.json()["detail"] == "Suspension reason is required"
+
+    suspend_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/lifecycle",
+        headers=admin_headers,
+        json={"status": "SUSPENDED", "suspension_reason": "Billing follow-up required"},
+    )
     assert suspend_response.status_code == 200, suspend_response.text
     assert suspend_response.json()["status"] == "SUSPENDED"
     assert suspend_response.json()["is_active"] is False
+    assert suspend_response.json()["suspension_reason"] == "Billing follow-up required"
 
     owner_login_response = api_client.post(
         "/api/v1/auth/login",
@@ -400,6 +409,54 @@ def test_admin_can_update_tenant_subscription_status(
     assert audit_response.status_code == 200, audit_response.text
     assert audit_response.json()[0]["restaurant_id"] == restaurant_id
     assert audit_response.json()[0]["action"] == "RESTAURANT_SUBSCRIPTION_UPDATED"
+
+
+def test_admin_can_update_private_platform_tenant_notes(
+    api_client: TestClient,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant_id = str(seeded_restaurant["restaurant"].id)
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    forbidden_response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/platform-notes",
+        headers=owner_headers,
+        json={"platform_notes": "Owner should not write platform notes"},
+    )
+    assert forbidden_response.status_code == 403
+
+    response = api_client.patch(
+        f"/api/v1/restaurants/{restaurant_id}/platform-notes",
+        headers=admin_headers,
+        json={"platform_notes": "Follow up on subscription before renewal."},
+    )
+    assert response.status_code == 200, response.text
+
+    owner_restaurant_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}",
+        headers=owner_headers,
+    )
+    assert owner_restaurant_response.status_code == 200, owner_restaurant_response.text
+    assert "platform_notes" not in owner_restaurant_response.json()
+
+    platform_response = api_client.get("/api/v1/restaurants/platform", headers=admin_headers)
+    assert platform_response.status_code == 200, platform_response.text
+    tenant = next(
+        restaurant for restaurant in platform_response.json() if restaurant["id"] == restaurant_id
+    )
+    assert tenant["platform_notes"] == "Follow up on subscription before renewal."
+
+    audit_response = api_client.get(
+        "/api/v1/platform/audit-logs/",
+        headers=admin_headers,
+        params={"action": "RESTAURANT_PLATFORM_NOTES_UPDATED"},
+    )
+    assert audit_response.status_code == 200, audit_response.text
+    assert audit_response.json()[0]["restaurant_id"] == restaurant_id
+    assert audit_response.json()[0]["new_values"]["platform_notes"] == (
+        "Follow up on subscription before renewal."
+    )
 
 
 def test_overdue_tenant_can_accept_orders_during_grace_period(

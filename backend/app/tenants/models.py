@@ -28,6 +28,7 @@ class Restaurant(Base):
     subscription_started_at = Column(DateTime(timezone=True), nullable=True)
     subscription_renews_at = Column(DateTime(timezone=True), nullable=True)
     suspension_reason = Column(String, nullable=True)
+    platform_notes = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

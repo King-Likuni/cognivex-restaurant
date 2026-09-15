@@ -95,6 +95,7 @@ const PLATFORM_AUDIT_ACTIONS = [
   "OWNER_INVITED",
   "PASSWORD_SETUP_LINK_CREATED",
   "RESTAURANT_LIFECYCLE_UPDATED",
+  "RESTAURANT_PLATFORM_NOTES_UPDATED",
   "RESTAURANT_SUBSCRIPTION_UPDATED",
   "PLATFORM_USER_INVITED",
   "PLATFORM_USER_UPDATED",
@@ -197,6 +198,7 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
   const [actionRestaurantId, setActionRestaurantId] = useState<string | null>(null);
   const [suspendingRestaurantId, setSuspendingRestaurantId] = useState<string | null>(null);
   const [suspensionReason, setSuspensionReason] = useState("");
+  const [tenantNoteDrafts, setTenantNoteDrafts] = useState<Record<string, string>>({});
   const [subscriptionDrafts, setSubscriptionDrafts] = useState<Record<string, SubscriptionDraft>>(
     {},
   );
@@ -279,6 +281,11 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
         { token },
       );
       setRestaurants(nextRestaurants);
+      setTenantNoteDrafts(
+        Object.fromEntries(
+          nextRestaurants.map((restaurant) => [restaurant.id, restaurant.platform_notes ?? ""]),
+        ),
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load restaurants");
     } finally {
@@ -477,6 +484,25 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
       await loadRestaurants();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update subscription");
+    } finally {
+      setActionRestaurantId(null);
+    }
+  }
+
+  async function updateTenantNotes(restaurant: PlatformRestaurantSummary) {
+    setNotice(null);
+    setError(null);
+    setActionRestaurantId(restaurant.id);
+    try {
+      await apiRequest(`/api/v1/restaurants/${restaurant.id}/platform-notes`, {
+        method: "PATCH",
+        token,
+        body: { platform_notes: tenantNoteDrafts[restaurant.id]?.trim() || null },
+      });
+      setNotice(`${restaurant.name} platform notes updated`);
+      await loadRestaurants();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update platform notes");
     } finally {
       setActionRestaurantId(null);
     }
@@ -870,6 +896,41 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                         Owner setup expires {formatDateTime(restaurant.owner_setup_expires_at)}
                       </p>
                     ) : null}
+                    <div className="tenant-platform-notes">
+                      <span>
+                        <ClipboardList size={15} />
+                        Platform notes
+                      </span>
+                      {canManagePlatform ? (
+                        <>
+                          <textarea
+                            value={tenantNoteDrafts[restaurant.id] ?? ""}
+                            onChange={(event) =>
+                              setTenantNoteDrafts((current) => ({
+                                ...current,
+                                [restaurant.id]: event.target.value,
+                              }))
+                            }
+                            rows={3}
+                            maxLength={2000}
+                            placeholder={
+                              "Private operator notes for onboarding, support, billing, or risk"
+                            }
+                          />
+                          <button
+                            className="secondary-action"
+                            type="button"
+                            onClick={() => void updateTenantNotes(restaurant)}
+                            disabled={actionRestaurantId === restaurant.id}
+                          >
+                            <ClipboardList size={17} />
+                            Save note
+                          </button>
+                        </>
+                      ) : (
+                        <p>{restaurant.platform_notes || "No platform notes recorded"}</p>
+                      )}
+                    </div>
                     <div className="tenant-card-meta">
                       <span>{restaurant.branch_count} branches</span>
                       <span>{restaurant.active_user_count} users</span>
