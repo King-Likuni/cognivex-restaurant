@@ -17,6 +17,7 @@ from app.auth.service import (
     hash_setup_token,
     user_audit_values,
 )
+from app.core.config import settings
 from app.core.security import get_password_hash
 from app.inventory import service as inventory_service
 from app.orders.enums import OrderStatus, PaymentStatus
@@ -47,10 +48,74 @@ SUBSCRIPTION_STATUSES = {
     SUBSCRIPTION_OVERDUE,
     SUBSCRIPTION_CANCELLED,
 }
+ORDER_ACCESS_ACTIVE = "ACTIVE"
+ORDER_ACCESS_GRACE_PERIOD = "GRACE_PERIOD"
+ORDER_ACCESS_BLOCKED = "BLOCKED"
+
+
+def aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def money(value: Decimal | int | None) -> Decimal:
     return Decimal(value or 0).quantize(Decimal("0.01"))
+
+
+def subscription_grace_ends_at(restaurant: Restaurant) -> datetime | None:
+    renewal_date = aware_utc(restaurant.subscription_renews_at)
+    if renewal_date is None:
+        return None
+    return renewal_date + timedelta(days=settings.SUBSCRIPTION_OVERDUE_GRACE_DAYS)
+
+
+def restaurant_order_access(
+    restaurant: Restaurant,
+    *,
+    now: datetime | None = None,
+) -> tuple[str, str | None, datetime | None]:
+    current_time = now or datetime.now(UTC)
+    tenant_status = (restaurant.status or "").upper()
+    subscription_status = (restaurant.subscription_status or "").upper()
+
+    if tenant_status != TENANT_ACTIVE or not restaurant.is_active:
+        return (
+            ORDER_ACCESS_BLOCKED,
+            "Restaurant is not active. New orders are temporarily unavailable.",
+            None,
+        )
+
+    if subscription_status == SUBSCRIPTION_CANCELLED:
+        return (
+            ORDER_ACCESS_BLOCKED,
+            "Subscription is cancelled. Renew before accepting new orders.",
+            None,
+        )
+
+    if subscription_status == SUBSCRIPTION_OVERDUE:
+        grace_ends_at = subscription_grace_ends_at(restaurant)
+        if grace_ends_at is not None and current_time > grace_ends_at:
+            return (
+                ORDER_ACCESS_BLOCKED,
+                "Subscription grace period has ended. Renew before accepting new orders.",
+                grace_ends_at,
+            )
+        return (
+            ORDER_ACCESS_GRACE_PERIOD,
+            "Subscription is overdue. New orders are still allowed during the grace period.",
+            grace_ends_at,
+        )
+
+    return ORDER_ACCESS_ACTIVE, None, None
+
+
+def ensure_restaurant_can_accept_orders(restaurant: Restaurant) -> None:
+    order_access_status, message, _ = restaurant_order_access(restaurant)
+    if order_access_status == ORDER_ACCESS_BLOCKED:
+        raise ValueError(message or "Restaurant cannot accept new orders")
 
 
 def normalize_code(value: str) -> str:
@@ -330,6 +395,7 @@ def platform_restaurant_summary(db: Session, restaurant: Restaurant) -> Platform
                 critical_stock_alert_count += 1
             else:
                 low_stock_alert_count += 1
+    order_access_status, order_access_message, grace_ends_at = restaurant_order_access(restaurant)
 
     return PlatformRestaurantSummary(
         id=restaurant.id,
@@ -356,6 +422,10 @@ def platform_restaurant_summary(db: Session, restaurant: Restaurant) -> Platform
         low_stock_alert_count=low_stock_alert_count,
         critical_stock_alert_count=critical_stock_alert_count,
         last_order_at=last_order_at,
+        order_access_status=order_access_status,
+        order_access_message=order_access_message,
+        order_access_blocked=order_access_status == ORDER_ACCESS_BLOCKED,
+        subscription_grace_ends_at=grace_ends_at,
         created_at=restaurant.created_at,
     )
 

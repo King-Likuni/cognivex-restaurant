@@ -145,7 +145,10 @@ function summarizeValues(values: Record<string, unknown> | null) {
 }
 
 function statusPillClass(status: string) {
-  return status === "SUSPENDED" || status === "OVERDUE" || status === "CANCELLED"
+  return status === "SUSPENDED" ||
+    status === "OVERDUE" ||
+    status === "CANCELLED" ||
+    status === "BLOCKED"
     ? "status-pill inactive"
     : "status-pill";
 }
@@ -861,10 +864,16 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                     <span className={statusPillClass(restaurant.status)}>
                       {restaurant.status.replace("_", " ")}
                     </span>
+                    <span className={statusPillClass(restaurant.order_access_status)}>
+                      Orders {formatAction(restaurant.order_access_status)}
+                    </span>
                   </div>
                   <div className="tenant-card-body">
                     <h3>{restaurant.name}</h3>
                     <span>{restaurant.code}</span>
+                    {restaurant.order_access_message ? (
+                      <p className="tenant-warning">{restaurant.order_access_message}</p>
+                    ) : null}
                     <div className="tenant-subscription-grid">
                       <label>
                         <span>Subscription</span>
@@ -960,6 +969,9 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                   <span className={statusPillClass(restaurant.subscription_status)}>
                     {restaurant.subscription_status}
                   </span>
+                  <span className={statusPillClass(restaurant.order_access_status)}>
+                    Orders {formatAction(restaurant.order_access_status)}
+                  </span>
                 </div>
                 <div className="tenant-card-body">
                   <h3>{restaurant.name}</h3>
@@ -973,9 +985,16 @@ export function PlatformAdminView({ token, module, roleName }: Props) {
                     <span>{restaurant.low_stock_alert_count} low stock alerts</span>
                     <span>{restaurant.branch_count} branches</span>
                     <span>{restaurant.active_user_count} users</span>
+                    <span>{formatAction(restaurant.order_access_status)} order access</span>
                   </div>
+                  {restaurant.order_access_message ? (
+                    <p className="tenant-warning">{restaurant.order_access_message}</p>
+                  ) : null}
                   <div className="tenant-card-meta">
                     <span>Last order {formatDateTime(restaurant.last_order_at)}</span>
+                    {restaurant.subscription_grace_ends_at ? (
+                      <span>Grace ends {formatDateTime(restaurant.subscription_grace_ends_at)}</span>
+                    ) : null}
                     <span>{restaurant.owner_name ?? "No owner"}</span>
                   </div>
                 </div>

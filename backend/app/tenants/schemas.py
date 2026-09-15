@@ -112,6 +112,10 @@ class PlatformRestaurantSummary(BaseModel):
     low_stock_alert_count: int
     critical_stock_alert_count: int
     last_order_at: datetime | None
+    order_access_status: str
+    order_access_message: str | None
+    order_access_blocked: bool
+    subscription_grace_ends_at: datetime | None
     created_at: datetime | None
 
 

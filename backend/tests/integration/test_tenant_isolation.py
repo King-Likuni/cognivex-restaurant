@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -400,6 +400,97 @@ def test_admin_can_update_tenant_subscription_status(
     assert audit_response.status_code == 200, audit_response.text
     assert audit_response.json()[0]["restaurant_id"] == restaurant_id
     assert audit_response.json()[0]["action"] == "RESTAURANT_SUBSCRIPTION_UPDATED"
+
+
+def test_overdue_tenant_can_accept_orders_during_grace_period(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    item = create_menu_item(api_client, restaurant_id, owner_headers)
+
+    restaurant.subscription_status = "OVERDUE"
+    restaurant.subscription_renews_at = datetime.now(UTC) - timedelta(days=2)
+    db_session.add(restaurant)
+    db_session.commit()
+
+    order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=owner_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert order_response.status_code == 201, order_response.text
+
+    platform_response = api_client.get("/api/v1/restaurants/platform", headers=admin_headers)
+    assert platform_response.status_code == 200, platform_response.text
+    tenant = next(
+        restaurant for restaurant in platform_response.json() if restaurant["id"] == restaurant_id
+    )
+    assert tenant["order_access_status"] == "GRACE_PERIOD"
+    assert tenant["order_access_blocked"] is False
+    assert tenant["subscription_grace_ends_at"] is not None
+
+
+def test_subscription_grace_expiry_blocks_new_cashier_and_qr_orders(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+    admin_headers = login(api_client, "admin@example.com", "adminpassword")
+    item = create_menu_item(api_client, restaurant_id, owner_headers)
+
+    restaurant.subscription_status = "OVERDUE"
+    restaurant.subscription_renews_at = datetime.now(UTC) - timedelta(days=8)
+    db_session.add(restaurant)
+    db_session.commit()
+
+    cashier_order_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/branches/{branch_id}/orders/cashier",
+        headers=owner_headers,
+        json={
+            "customer_id": None,
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+            "payment_method": "CASH",
+        },
+    )
+    assert cashier_order_response.status_code == 400
+    assert "grace period has ended" in cashier_order_response.json()["detail"]
+
+    public_order_response = api_client.post(
+        f"/api/v1/public/restaurants/{restaurant_id}/branches/{branch_id}/orders",
+        json={
+            "customer_name": "Blocked Customer",
+            "customer_phone_number": "+26771119999",
+            "channel": "QR",
+            "payment_provider": "ORANGE_MONEY",
+            "items": [{"menu_item_id": item["id"], "quantity": 1}],
+        },
+    )
+    assert public_order_response.status_code == 400
+    assert "grace period has ended" in public_order_response.json()["detail"]
+
+    platform_response = api_client.get("/api/v1/restaurants/platform", headers=admin_headers)
+    assert platform_response.status_code == 200, platform_response.text
+    tenant = next(
+        restaurant for restaurant in platform_response.json() if restaurant["id"] == restaurant_id
+    )
+    assert tenant["order_access_status"] == "BLOCKED"
+    assert tenant["order_access_blocked"] is True
 
 
 def test_platform_restaurant_summary_includes_tenant_health(

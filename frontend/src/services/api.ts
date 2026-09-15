@@ -85,6 +85,10 @@ export type PlatformRestaurantSummary = Restaurant & {
   low_stock_alert_count: number;
   critical_stock_alert_count: number;
   last_order_at: string | null;
+  order_access_status: "ACTIVE" | "GRACE_PERIOD" | "BLOCKED" | string;
+  order_access_message: string | null;
+  order_access_blocked: boolean;
+  subscription_grace_ends_at: string | null;
 };
 
 export type Branch = {

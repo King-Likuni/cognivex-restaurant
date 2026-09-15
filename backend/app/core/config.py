@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     INITIAL_OWNER_EMAIL: str = "owner@chickenspot.com"
     INITIAL_OWNER_PASSWORD: str = "ownerpassword"
     ENABLE_SAMPLE_DATA: bool = True
+    SUBSCRIPTION_OVERDUE_GRACE_DAYS: int = 7
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

@@ -26,6 +26,7 @@ from app.payments.proof import (
     requires_mobile_transfer_proof,
 )
 from app.realtime.events import publish_order_event
+from app.tenants import service as tenant_service
 from app.tenants.models import Branch, Restaurant, RestaurantSettings
 
 
@@ -147,6 +148,7 @@ def create_pending_order(
     created_by: User | None,
 ) -> Order:
     restaurant, branch = get_active_restaurant_and_branch(db, restaurant_id, branch_id)
+    tenant_service.ensure_restaurant_can_accept_orders(restaurant)
     from app.inventory.service import validate_order_stock_available
 
     validate_order_stock_available(db, restaurant_id, branch_id, items)
