@@ -1080,6 +1080,12 @@ button:disabled {
   resize: vertical;
 }
 
+.setup-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .setup-link-action {
   width: fit-content;
   margin-top: 10px;
@@ -1525,6 +1531,7 @@ button:disabled {
   .branch-admin-grid,
   .staff-profile-grid,
   .staff-edit-grid,
+  .setup-inline-grid,
   .tenant-subscription-grid {
     align-items: stretch;
     flex-direction: column;

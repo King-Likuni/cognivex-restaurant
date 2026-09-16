@@ -14,9 +14,11 @@ import type { AppContext, ViewKey } from "../App";
 import { EmptyState, Field, Notice, Panel, Stat } from "../components/ui";
 import {
   apiRequest,
+  type Ingredient,
   type MenuCategory,
   type MenuItem,
   type RestaurantSetupStatus,
+  type StockLocation,
 } from "../services/api";
 
 type Props = {
@@ -35,10 +37,22 @@ export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
   const [itemName, setItemName] = useState("");
   const [itemDescription, setItemDescription] = useState("");
   const [itemPrice, setItemPrice] = useState("");
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [locations, setLocations] = useState<StockLocation[]>([]);
+  const [inventoryMenuItemId, setInventoryMenuItemId] = useState("");
+  const [ingredientName, setIngredientName] = useState("");
+  const [ingredientUnit, setIngredientUnit] = useState("portion");
+  const [locationName, setLocationName] = useState("Kitchen");
+  const [startingQuantity, setStartingQuantity] = useState("10.000");
+  const [recipeQuantity, setRecipeQuantity] = useState("1.000");
+  const [warningQuantity, setWarningQuantity] = useState("5.000");
+  const [criticalQuantity, setCriticalQuantity] = useState("2.000");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingMenu, setIsSavingMenu] = useState(false);
+  const [isSavingInventory, setIsSavingInventory] = useState(false);
 
   const qrUrl = useMemo(() => setupUrl(status?.qr_order_url_path ?? null), [status]);
 
@@ -46,14 +60,38 @@ export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
     setIsLoading(true);
     setError(null);
     try {
-      const nextStatus = await apiRequest<RestaurantSetupStatus>(
-        `/api/v1/restaurants/${context.restaurant.id}/setup/status`,
-        {
+      const [nextStatus, nextMenuItems, nextIngredients, nextLocations] = await Promise.all([
+        apiRequest<RestaurantSetupStatus>(
+          `/api/v1/restaurants/${context.restaurant.id}/setup/status`,
+          {
+            token,
+            params: { branch_id: context.branch.id },
+          },
+        ),
+        apiRequest<MenuItem[]>(`/api/v1/restaurants/${context.restaurant.id}/menu/items`, {
           token,
-          params: { branch_id: context.branch.id },
-        },
-      );
+        }),
+        apiRequest<Ingredient[]>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/ingredients`,
+          { token },
+        ),
+        apiRequest<StockLocation[]>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/locations`,
+          { token },
+        ),
+      ]);
       setStatus(nextStatus);
+      setMenuItems(nextMenuItems);
+      setIngredients(nextIngredients);
+      setLocations(nextLocations);
+      setInventoryMenuItemId((current) =>
+        current && nextMenuItems.some((item) => item.id === current)
+          ? current
+          : nextMenuItems[0]?.id ?? "",
+      );
+      setIngredientName((current) => current || nextIngredients[0]?.name || "");
+      setIngredientUnit((current) => current || nextIngredients[0]?.unit || "portion");
+      setLocationName((current) => current || nextLocations[0]?.name || "Kitchen");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load setup status");
     } finally {
@@ -115,6 +153,87 @@ export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
       setError(caught instanceof Error ? caught.message : "Could not create menu item");
     } finally {
       setIsSavingMenu(false);
+    }
+  }
+
+  function matchingIngredient() {
+    const normalizedName = ingredientName.trim().toLowerCase();
+    return ingredients.find((ingredient) => ingredient.name.trim().toLowerCase() === normalizedName);
+  }
+
+  function matchingLocation() {
+    const normalizedName = locationName.trim().toLowerCase();
+    return locations.find((location) => location.name.trim().toLowerCase() === normalizedName);
+  }
+
+  async function createFirstInventory(event: React.FormEvent) {
+    event.preventDefault();
+    setNotice(null);
+    setError(null);
+    if (!inventoryMenuItemId) {
+      setError("Create a menu item before linking inventory");
+      return;
+    }
+    setIsSavingInventory(true);
+    try {
+      const ingredient =
+        matchingIngredient() ??
+        (await apiRequest<Ingredient>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/ingredients`,
+          {
+            method: "POST",
+            token,
+            body: { name: ingredientName.trim(), unit: ingredientUnit.trim() },
+          },
+        ));
+      const location =
+        matchingLocation() ??
+        (await apiRequest<StockLocation>(
+          `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/locations`,
+          {
+            method: "POST",
+            token,
+            body: { name: locationName.trim() },
+          },
+        ));
+      await apiRequest(
+        `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/movements`,
+        {
+          method: "POST",
+          token,
+          body: {
+            stock_location_id: location.id,
+            ingredient_id: ingredient.id,
+            movement_type: "RECEIVED",
+            quantity: startingQuantity,
+          },
+        },
+      );
+      await apiRequest(
+        `/api/v1/restaurants/${context.restaurant.id}/inventory/menu-items/${inventoryMenuItemId}/recipe-items`,
+        {
+          method: "PUT",
+          token,
+          body: { ingredient_id: ingredient.id, quantity: recipeQuantity },
+        },
+      );
+      await apiRequest(
+        `/api/v1/restaurants/${context.restaurant.id}/inventory/branches/${context.branch.id}/thresholds/${ingredient.id}`,
+        {
+          method: "PUT",
+          token,
+          body: {
+            warning_quantity: warningQuantity,
+            critical_quantity: criticalQuantity,
+          },
+        },
+      );
+      setNotice("First inventory setup saved");
+      await loadStatus();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save inventory setup");
+    } finally {
+      setIsSavingInventory(false);
     }
   }
 
@@ -241,6 +360,101 @@ export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
               <button className="primary-action" type="submit" disabled={isSavingMenu}>
                 <Save size={18} />
                 {isSavingMenu ? "Creating item" : "Create menu item"}
+              </button>
+            </form>
+          </Panel>
+
+          <Panel title="First Inventory Setup">
+            <form className="setup-menu-form" onSubmit={createFirstInventory}>
+              <Field label="Menu item">
+                <select
+                  value={inventoryMenuItemId}
+                  onChange={(event) => setInventoryMenuItemId(event.target.value)}
+                  required
+                >
+                  {!menuItems.length ? <option value="">Create a menu item first</option> : null}
+                  {menuItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Ingredient">
+                <input
+                  value={ingredientName}
+                  onChange={(event) => setIngredientName(event.target.value)}
+                  placeholder="Chicken Quarter"
+                  required
+                />
+              </Field>
+              <Field label="Unit">
+                <input
+                  value={ingredientUnit}
+                  onChange={(event) => setIngredientUnit(event.target.value)}
+                  placeholder="portion"
+                  required
+                />
+              </Field>
+              <Field label="Stock location">
+                <input
+                  value={locationName}
+                  onChange={(event) => setLocationName(event.target.value)}
+                  placeholder="Kitchen"
+                  required
+                />
+              </Field>
+              <div className="setup-inline-grid">
+                <Field label="Starting stock">
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={startingQuantity}
+                    onChange={(event) => setStartingQuantity(event.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Recipe qty">
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={recipeQuantity}
+                    onChange={(event) => setRecipeQuantity(event.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+              <div className="setup-inline-grid">
+                <Field label="Warning level">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={warningQuantity}
+                    onChange={(event) => setWarningQuantity(event.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Critical level">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={criticalQuantity}
+                    onChange={(event) => setCriticalQuantity(event.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+              <button
+                className="primary-action"
+                type="submit"
+                disabled={isSavingInventory || !menuItems.length}
+              >
+                <Save size={18} />
+                {isSavingInventory ? "Saving inventory" : "Save inventory setup"}
               </button>
             </form>
           </Panel>
