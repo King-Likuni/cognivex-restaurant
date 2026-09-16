@@ -5,13 +5,19 @@ import {
   ExternalLink,
   RefreshCw,
   Rocket,
+  Save,
   Store,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AppContext, ViewKey } from "../App";
-import { EmptyState, Notice, Panel, Stat } from "../components/ui";
-import { apiRequest, type RestaurantSetupStatus } from "../services/api";
+import { EmptyState, Field, Notice, Panel, Stat } from "../components/ui";
+import {
+  apiRequest,
+  type MenuCategory,
+  type MenuItem,
+  type RestaurantSetupStatus,
+} from "../services/api";
 
 type Props = {
   context: AppContext;
@@ -25,9 +31,14 @@ function setupUrl(path: string | null) {
 
 export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
   const [status, setStatus] = useState<RestaurantSetupStatus | null>(null);
+  const [categoryName, setCategoryName] = useState("Meals");
+  const [itemName, setItemName] = useState("");
+  const [itemDescription, setItemDescription] = useState("");
+  const [itemPrice, setItemPrice] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingMenu, setIsSavingMenu] = useState(false);
 
   const qrUrl = useMemo(() => setupUrl(status?.qr_order_url_path ?? null), [status]);
 
@@ -63,6 +74,47 @@ export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
       setNotice("Customer ordering link copied");
     } catch {
       setError("Could not copy link. Select the link and copy it manually.");
+    }
+  }
+
+  async function createFirstMenuItem(event: React.FormEvent) {
+    event.preventDefault();
+    setNotice(null);
+    setError(null);
+    setIsSavingMenu(true);
+    try {
+      const category = await apiRequest<MenuCategory>(
+        `/api/v1/restaurants/${context.restaurant.id}/menu/categories`,
+        {
+          method: "POST",
+          token,
+          body: {
+            name: categoryName.trim(),
+            display_order: 1,
+          },
+        },
+      );
+      await apiRequest<MenuItem>(`/api/v1/restaurants/${context.restaurant.id}/menu/items`, {
+        method: "POST",
+        token,
+        body: {
+          category_id: category.id,
+          name: itemName.trim(),
+          description: itemDescription.trim() || null,
+          price: itemPrice,
+          image_url: null,
+          is_available: true,
+        },
+      });
+      setItemName("");
+      setItemDescription("");
+      setItemPrice("");
+      setNotice("First menu item created");
+      await loadStatus();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create menu item");
+    } finally {
+      setIsSavingMenu(false);
     }
   }
 
@@ -149,6 +201,50 @@ export function OwnerSetupWizard({ context, token, onNavigate }: Props) {
         </Panel>
 
         <div className="view-stack">
+          <Panel title="First Menu Item">
+            <form className="setup-menu-form" onSubmit={createFirstMenuItem}>
+              <Field label="Category">
+                <input
+                  value={categoryName}
+                  onChange={(event) => setCategoryName(event.target.value)}
+                  placeholder="Meals"
+                  required
+                />
+              </Field>
+              <Field label="Item name">
+                <input
+                  value={itemName}
+                  onChange={(event) => setItemName(event.target.value)}
+                  placeholder="Quarter Chicken and Chips"
+                  required
+                />
+              </Field>
+              <Field label="Description">
+                <textarea
+                  value={itemDescription}
+                  onChange={(event) => setItemDescription(event.target.value)}
+                  placeholder="Short customer-facing description"
+                  rows={3}
+                />
+              </Field>
+              <Field label="Price">
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={itemPrice}
+                  onChange={(event) => setItemPrice(event.target.value)}
+                  placeholder="55.00"
+                  required
+                />
+              </Field>
+              <button className="primary-action" type="submit" disabled={isSavingMenu}>
+                <Save size={18} />
+                {isSavingMenu ? "Creating item" : "Create menu item"}
+              </button>
+            </form>
+          </Panel>
+
           <Panel title="Customer QR Link">
             <div className="setup-link-card">
               <Store size={22} />

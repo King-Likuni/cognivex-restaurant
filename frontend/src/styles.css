@@ -1071,6 +1071,15 @@ button:disabled {
   font-weight: 800;
 }
 
+.setup-menu-form {
+  display: grid;
+  gap: 12px;
+}
+
+.setup-menu-form textarea {
+  resize: vertical;
+}
+
 .setup-link-action {
   width: fit-content;
   margin-top: 10px;
