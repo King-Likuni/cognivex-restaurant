@@ -20,6 +20,8 @@ from app.auth.service import (
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.inventory import service as inventory_service
+from app.inventory.models import Ingredient, MenuItemRecipeItem, StockLocation, StockThreshold
+from app.menu.models import MenuCategory, MenuItem
 from app.orders.enums import OrderStatus, PaymentStatus
 from app.orders.models import Order
 from app.payments.models import Payment
@@ -32,6 +34,9 @@ from app.tenants.schemas import (
     RestaurantOnboardingCreate,
     RestaurantPlatformNotesUpdate,
     RestaurantSettingsUpdate,
+    RestaurantSetupCounts,
+    RestaurantSetupStatus,
+    RestaurantSetupStep,
     RestaurantSubscriptionUpdate,
 )
 
@@ -437,6 +442,187 @@ def list_platform_restaurants(db: Session) -> list[PlatformRestaurantSummary]:
         db.query(Restaurant).order_by(Restaurant.created_at.desc(), Restaurant.name.asc()).all()
     )
     return [platform_restaurant_summary(db, restaurant) for restaurant in restaurants]
+
+
+def setup_step(
+    key: str,
+    label: str,
+    description: str,
+    is_complete: bool,
+    count: int,
+    action_view: str,
+) -> RestaurantSetupStep:
+    return RestaurantSetupStep(
+        key=key,
+        label=label,
+        description=description,
+        is_complete=is_complete,
+        count=count,
+        action_view=action_view,
+    )
+
+
+def is_placeholder_branch(branch: Branch) -> bool:
+    return branch.name.strip().lower() == "string"
+
+
+def restaurant_setup_status(
+    db: Session,
+    restaurant_id: UUID,
+    *,
+    branch_id: UUID | None = None,
+) -> RestaurantSetupStatus | None:
+    restaurant = get_restaurant(db, restaurant_id)
+    if restaurant is None:
+        return None
+
+    active_branches = list_branches(db, restaurant_id, include_inactive=False)
+    branch = None
+    if branch_id is not None:
+        branch = next(
+            (active_branch for active_branch in active_branches if active_branch.id == branch_id),
+            None,
+        )
+    if branch is None:
+        branch = next(
+            (
+                active_branch
+                for active_branch in active_branches
+                if not is_placeholder_branch(active_branch)
+            ),
+            active_branches[0] if active_branches else None,
+        )
+
+    staff_users = (
+        db.query(User)
+        .join(Role)
+        .filter(
+            User.restaurant_id == restaurant_id,
+            User.is_active.is_(True),
+            Role.name != "OWNER",
+        )
+        .count()
+    )
+    menu_categories = (
+        db.query(MenuCategory)
+        .filter(MenuCategory.restaurant_id == restaurant_id, MenuCategory.is_active.is_(True))
+        .count()
+    )
+    menu_items = (
+        db.query(MenuItem)
+        .filter(MenuItem.restaurant_id == restaurant_id, MenuItem.is_available.is_(True))
+        .count()
+    )
+    ingredients = db.query(Ingredient).filter(Ingredient.restaurant_id == restaurant_id).count()
+    stock_locations = 0
+    stock_thresholds = 0
+    if branch is not None:
+        stock_locations = (
+            db.query(StockLocation)
+            .filter(
+                StockLocation.restaurant_id == restaurant_id,
+                StockLocation.branch_id == branch.id,
+            )
+            .count()
+        )
+        stock_thresholds = (
+            db.query(StockThreshold)
+            .filter(
+                StockThreshold.restaurant_id == restaurant_id,
+                StockThreshold.branch_id == branch.id,
+            )
+            .count()
+        )
+    recipe_items = (
+        db.query(MenuItemRecipeItem)
+        .join(Ingredient, Ingredient.id == MenuItemRecipeItem.ingredient_id)
+        .filter(Ingredient.restaurant_id == restaurant_id)
+        .count()
+    )
+
+    counts = RestaurantSetupCounts(
+        active_branches=len(active_branches),
+        staff_users=staff_users,
+        menu_categories=menu_categories,
+        menu_items=menu_items,
+        ingredients=ingredients,
+        stock_locations=stock_locations,
+        recipe_items=recipe_items,
+        stock_thresholds=stock_thresholds,
+    )
+    steps = [
+        setup_step(
+            "branches",
+            "Confirm branch",
+            "Create or confirm at least one active operating branch.",
+            (
+                counts.active_branches > 0
+                and branch is not None
+                and not is_placeholder_branch(branch)
+            ),
+            counts.active_branches,
+            "branches",
+        ),
+        setup_step(
+            "menu",
+            "Build menu",
+            "Add at least one category and one item customers can order.",
+            counts.menu_categories > 0 and counts.menu_items > 0,
+            counts.menu_items,
+            "inventory",
+        ),
+        setup_step(
+            "inventory",
+            "Prepare inventory",
+            "Add ingredients and a stock location for the active branch.",
+            counts.ingredients > 0 and counts.stock_locations > 0,
+            counts.ingredients,
+            "inventory",
+        ),
+        setup_step(
+            "recipes",
+            "Link recipes and alerts",
+            "Link menu items to ingredients and set stock warning thresholds.",
+            counts.recipe_items > 0 and counts.stock_thresholds > 0,
+            counts.recipe_items,
+            "inventory",
+        ),
+        setup_step(
+            "staff",
+            "Invite staff",
+            "Create cashier, kitchen, inventory, or manager accounts for operations.",
+            counts.staff_users > 0,
+            counts.staff_users,
+            "staff",
+        ),
+        setup_step(
+            "qr",
+            "Publish QR ordering",
+            "Use the customer ordering link once branch and menu setup are ready.",
+            branch is not None and counts.menu_items > 0,
+            1 if branch is not None and counts.menu_items > 0 else 0,
+            "setup",
+        ),
+    ]
+    completed_steps = sum(1 for step in steps if step.is_complete)
+    qr_order_url_path = (
+        f"/order/restaurants/{restaurant_id}/branches/{branch.id}" if branch is not None else None
+    )
+    settings = get_restaurant_settings(db, restaurant_id)
+
+    return RestaurantSetupStatus(
+        restaurant_id=restaurant.id,
+        restaurant_name=restaurant.name,
+        branch_id=branch.id if branch else None,
+        branch_name=branch.name if branch else None,
+        currency=settings.currency if settings else "BWP",
+        is_ready=completed_steps == len(steps),
+        completed_steps=completed_steps,
+        total_steps=len(steps),
+        qr_order_url_path=qr_order_url_path,
+        counts=counts,
+        steps=steps,
+    )
 
 
 def update_restaurant_platform_notes(

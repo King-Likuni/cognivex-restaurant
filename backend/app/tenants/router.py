@@ -30,6 +30,7 @@ from app.tenants.schemas import (
     RestaurantResponse,
     RestaurantSettingsResponse,
     RestaurantSettingsUpdate,
+    RestaurantSetupStatus,
     RestaurantSubscriptionUpdate,
 )
 
@@ -113,6 +114,24 @@ def onboard_restaurant(
 def list_platform_restaurants(db: Session = Depends(get_db)):
     """List restaurants with platform-level lifecycle and ownership summary."""
     return service.list_platform_restaurants(db)
+
+
+@router.get(
+    "/{restaurant_id}/setup/status",
+    response_model=RestaurantSetupStatus,
+)
+def get_restaurant_setup_status(
+    restaurant_id: UUID,
+    branch_id: UUID | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_restaurant_owner),
+):
+    """Return the owner setup readiness checklist for a restaurant."""
+    ensure_restaurant_access(current_user, restaurant_id)
+    setup_status = service.restaurant_setup_status(db, restaurant_id, branch_id=branch_id)
+    if setup_status is None:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    return setup_status
 
 
 @router.patch(

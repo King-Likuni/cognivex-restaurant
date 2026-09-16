@@ -8,6 +8,7 @@ import {
   CreditCard,
   LogOut,
   RefreshCw,
+  Rocket,
   ShoppingCart,
   Store,
   Users,
@@ -23,6 +24,7 @@ import { AuditLogView } from "./manager/AuditLogView";
 import { BranchManagementView } from "./manager/BranchManagementView";
 import { InventoryView } from "./manager/InventoryView";
 import { DashboardView } from "./manager/DashboardView";
+import { OwnerSetupWizard } from "./manager/OwnerSetupWizard";
 import { StaffManagementView } from "./manager/StaffManagementView";
 import { KitchenView } from "./kitchen/KitchenView";
 import { PlatformAdminView, type PlatformAdminModule } from "./platform/PlatformAdminView";
@@ -45,13 +47,14 @@ export type AppContext = {
   branch: Branch;
 };
 
-type ViewKey =
+export type ViewKey =
   | "platform-tenants"
   | "platform-subscriptions"
   | "platform-health"
   | "platform-incidents"
   | "platform-users"
   | "platform-audit"
+  | "setup"
   | "cashier"
   | "kitchen"
   | "inventory"
@@ -71,6 +74,7 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof ShoppingCart }[] = 
   { key: "platform-incidents", label: "Incidents", icon: AlertTriangle },
   { key: "platform-users", label: "Platform Users", icon: Users },
   { key: "platform-audit", label: "Platform Audit", icon: ClipboardList },
+  { key: "setup", label: "Setup", icon: Rocket },
   { key: "cashier", label: "Cashier", icon: ShoppingCart },
   { key: "kitchen", label: "Kitchen", icon: ChefHat },
   { key: "inventory", label: "Inventory", icon: Boxes },
@@ -91,7 +95,7 @@ const ROLE_VIEWS: Partial<Record<RoleName, ViewKey[]>> = {
   ],
   SUPPORT: ["platform-tenants", "platform-health", "platform-incidents", "platform-audit"],
   FINANCE: ["platform-subscriptions", "platform-health", "platform-incidents", "platform-audit"],
-  OWNER: ["cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
+  OWNER: ["setup", "cashier", "kitchen", "inventory", "dashboard", "branches", "staff", "audit"],
   MANAGER: ["cashier", "kitchen", "inventory", "dashboard"],
   CASHIER: ["cashier", "kitchen", "inventory", "dashboard"],
   KITCHEN: ["cashier", "kitchen"],
@@ -185,7 +189,7 @@ function OperationsApp() {
   const [session, setSession] = useState<Session | null>(() => readStoredSession());
   const [context, setContext] = useState<AppContext | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [view, setView] = useState<ViewKey>("cashier");
+  const [view, setView] = useState<ViewKey>("setup");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -390,6 +394,11 @@ function OperationsApp() {
                 module={platformModule}
                 roleName={roleName}
               />
+            ) : null}
+            {view === "setup" && visibleNavItems.some((item) => item.key === "setup") ? (
+              context ? (
+                <OwnerSetupWizard context={context} token={token} onNavigate={setView} />
+              ) : null
             ) : null}
             {view === "cashier" && visibleNavItems.some((item) => item.key === "cashier") ? (
               context ? <CashierView context={context} token={token} /> : null

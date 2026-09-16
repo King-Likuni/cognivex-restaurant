@@ -92,6 +92,40 @@ export type PlatformRestaurantSummary = Restaurant & {
   subscription_grace_ends_at: string | null;
 };
 
+export type RestaurantSetupCounts = {
+  active_branches: number;
+  staff_users: number;
+  menu_categories: number;
+  menu_items: number;
+  ingredients: number;
+  stock_locations: number;
+  recipe_items: number;
+  stock_thresholds: number;
+};
+
+export type RestaurantSetupStep = {
+  key: string;
+  label: string;
+  description: string;
+  is_complete: boolean;
+  count: number;
+  action_view: string;
+};
+
+export type RestaurantSetupStatus = {
+  restaurant_id: string;
+  restaurant_name: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  currency: string;
+  is_ready: boolean;
+  completed_steps: number;
+  total_steps: number;
+  qr_order_url_path: string | null;
+  counts: RestaurantSetupCounts;
+  steps: RestaurantSetupStep[];
+};
+
 export type PlatformIncident = {
   id: string;
   restaurant_id: string | null;

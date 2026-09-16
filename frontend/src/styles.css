@@ -964,6 +964,135 @@ button:disabled {
   text-decoration: none;
 }
 
+.setup-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border-bottom: 1px solid #e4e9ef;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+
+.setup-hero h3,
+.setup-hero p {
+  margin: 0;
+}
+
+.setup-hero p {
+  color: #667286;
+  font-weight: 700;
+}
+
+.setup-icon,
+.setup-step-status {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #b45309;
+}
+
+.setup-icon {
+  width: 46px;
+  height: 46px;
+}
+
+.setup-icon.ready,
+.setup-step.complete .setup-step-status {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.setup-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.setup-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.setup-step.complete {
+  border-color: #b7e4cc;
+  background: #f5fbf8;
+}
+
+.setup-step-status {
+  width: 34px;
+  height: 34px;
+}
+
+.setup-step strong,
+.setup-step p {
+  margin: 0;
+}
+
+.setup-step p {
+  color: #667286;
+  font-size: 13px;
+}
+
+.setup-step span:not(.setup-step-status) {
+  color: #3e4d60;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.setup-link-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #fbfcfd;
+  margin-bottom: 12px;
+  padding: 10px;
+}
+
+.setup-link-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.setup-link-card span {
+  overflow-wrap: anywhere;
+  color: #667286;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.setup-link-action {
+  width: fit-content;
+  margin-top: 10px;
+  text-decoration: none;
+}
+
+.setup-count-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.setup-count-grid span {
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #3e4d60;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .audit-filter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(150px, 1fr));

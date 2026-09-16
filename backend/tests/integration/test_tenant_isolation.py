@@ -237,6 +237,92 @@ def test_admin_can_create_owner_setup_link(
     assert preview_response.json()["email"] == "owner@example.com"
 
 
+def test_owner_setup_status_tracks_restaurant_readiness(
+    api_client: TestClient,
+    db_session: Session,
+    seeded_restaurant: dict[str, object],
+):
+    restaurant = seeded_restaurant["restaurant"]
+    branch = seeded_restaurant["branch"]
+    restaurant_id = str(restaurant.id)
+    branch_id = str(branch.id)
+    owner_headers = login(api_client, "owner@example.com", "ownerpassword")
+
+    initial_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/setup/status",
+        headers=owner_headers,
+        params={"branch_id": branch_id},
+    )
+    assert initial_response.status_code == 200, initial_response.text
+    initial_status = initial_response.json()
+    assert initial_status["is_ready"] is False
+    assert initial_status["qr_order_url_path"] == (
+        f"/order/restaurants/{restaurant_id}/branches/{branch_id}"
+    )
+    assert any(
+        step["key"] == "menu" and step["is_complete"] is False for step in initial_status["steps"]
+    )
+
+    staff = create_user(
+        db_session,
+        UserCreate(
+            email="setup-cashier@example.com",
+            password="cashierpassword",
+            first_name="Setup",
+            last_name="Cashier",
+            role_name="CASHIER",
+            restaurant_id=restaurant.id,
+            branch_ids=[branch.id],
+        ),
+    )
+    assert staff.id
+    item = create_menu_item(api_client, restaurant_id, owner_headers, item_name="Setup Meal")
+
+    ingredient_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/ingredients",
+        headers=owner_headers,
+        json={"name": "Setup Portion", "unit": "portion"},
+    )
+    assert ingredient_response.status_code == 201, ingredient_response.text
+    ingredient = ingredient_response.json()
+
+    location_response = api_client.post(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}/locations",
+        headers=owner_headers,
+        json={"name": "Kitchen"},
+    )
+    assert location_response.status_code == 201, location_response.text
+
+    recipe_response = api_client.put(
+        f"/api/v1/restaurants/{restaurant_id}/inventory/menu-items/{item['id']}/recipe-items",
+        headers=owner_headers,
+        json={"ingredient_id": ingredient["id"], "quantity": "1.000"},
+    )
+    assert recipe_response.status_code == 200, recipe_response.text
+
+    threshold_response = api_client.put(
+        (
+            f"/api/v1/restaurants/{restaurant_id}/inventory/branches/{branch_id}"
+            f"/thresholds/{ingredient['id']}"
+        ),
+        headers=owner_headers,
+        json={"warning_quantity": "5.000", "critical_quantity": "2.000"},
+    )
+    assert threshold_response.status_code == 200, threshold_response.text
+
+    ready_response = api_client.get(
+        f"/api/v1/restaurants/{restaurant_id}/setup/status",
+        headers=owner_headers,
+        params={"branch_id": branch_id},
+    )
+    assert ready_response.status_code == 200, ready_response.text
+    ready_status = ready_response.json()
+    assert ready_status["is_ready"] is True
+    assert ready_status["completed_steps"] == ready_status["total_steps"]
+    assert ready_status["counts"]["staff_users"] == 1
+    assert ready_status["counts"]["recipe_items"] == 1
+
+
 def test_admin_can_manage_platform_users_with_safety_checks(
     api_client: TestClient,
     seeded_restaurant: dict[str, object],

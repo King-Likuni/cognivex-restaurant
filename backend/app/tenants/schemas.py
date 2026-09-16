@@ -78,6 +78,40 @@ class RestaurantOnboardingResponse(BaseModel):
     invite: PasswordSetupTokenResponse
 
 
+class RestaurantSetupCounts(BaseModel):
+    active_branches: int
+    staff_users: int
+    menu_categories: int
+    menu_items: int
+    ingredients: int
+    stock_locations: int
+    recipe_items: int
+    stock_thresholds: int
+
+
+class RestaurantSetupStep(BaseModel):
+    key: str
+    label: str
+    description: str
+    is_complete: bool
+    count: int
+    action_view: str
+
+
+class RestaurantSetupStatus(BaseModel):
+    restaurant_id: UUID
+    restaurant_name: str
+    branch_id: UUID | None
+    branch_name: str | None
+    currency: str
+    is_ready: bool
+    completed_steps: int
+    total_steps: int
+    qr_order_url_path: str | None
+    counts: RestaurantSetupCounts
+    steps: list[RestaurantSetupStep]
+
+
 class RestaurantLifecycleUpdate(BaseModel):
     status: Literal["ACTIVE", "SUSPENDED"]
     suspension_reason: str | None = Field(default=None, max_length=300)
